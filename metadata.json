@@ -1,0 +1,6 @@
+{
+  "name": "VolleyManager - Gestione Atleti & Allenamenti",
+  "description": "Piattaforma gestionale per società di pallavolo: anagrafica atleti, statistiche, presenze, storico infortuni, progressi fisici/tecnici, calendario convocazioni partite e dashboard dedicate per allenatori e giocatori su Firestore.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
