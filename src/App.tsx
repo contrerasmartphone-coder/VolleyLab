@@ -29,7 +29,8 @@ import { Athlete, TrainingSession, MatchEvent, User } from './types';
 import { Shield, Sparkles, Activity, Trophy, Calendar, Users, HeartPulse, Zap } from 'lucide-react';
 
 function MainAppContent() {
-  const { currentUser, isCoach, isStaff, isAthlete, updateUser } = useAuth();
+  const { currentUser, isCoach, isStaff, isAthlete, updateUser, canManageAll } = useAuth();
+  const canManage = isCoach || isStaff || Boolean(canManageAll);
 
   // Active Tab state
   const [activeTab, setActiveTab] = useState<'athletes' | 'trainings' | 'matches' | 'users' | 'my_portal'>('athletes');
@@ -51,11 +52,7 @@ function MainAppContent() {
   useEffect(() => {
     if (currentUser?.role === 'athlete') {
       setActiveTab('my_portal');
-    } else if (currentUser?.role === 'staff') {
-      if (activeTab === 'my_portal' || activeTab === 'users') {
-        setActiveTab('athletes');
-      }
-    } else if (currentUser?.role === 'coach') {
+    } else if (currentUser?.role === 'staff' || currentUser?.role === 'coach') {
       if (activeTab === 'my_portal') {
         setActiveTab('athletes');
       }
@@ -267,8 +264,8 @@ function MainAppContent() {
                 athletes={athletes}
                 trainings={trainings}
                 onSaveAthlete={handleSaveAthlete}
-                onDeleteAthlete={isCoach ? handleDeleteAthlete : undefined}
-                isCoach={isCoach}
+                onDeleteAthlete={canManage ? handleDeleteAthlete : undefined}
+                isCoach={canManage}
               />
             )}
 
@@ -279,8 +276,8 @@ function MainAppContent() {
                 athletes={athletes}
                 currentUser={currentUser}
                 onSaveTraining={handleSaveTraining}
-                onDeleteTraining={isCoach ? handleDeleteTraining : undefined}
-                isCoach={isCoach}
+                onDeleteTraining={canManage ? handleDeleteTraining : undefined}
+                isCoach={canManage}
               />
             )}
 
@@ -292,13 +289,13 @@ function MainAppContent() {
                 athletes={athletes}
                 currentUser={currentUser}
                 onSaveMatch={handleSaveMatch}
-                onDeleteMatch={isCoach ? handleDeleteMatch : undefined}
-                isCoach={isCoach}
+                onDeleteMatch={canManage ? handleDeleteMatch : undefined}
+                isCoach={canManage}
               />
             )}
 
-            {/* VIEW 5: USER CREDENTIALS TABLE (COACH ONLY) */}
-            {activeTab === 'users' && isCoach && (
+            {/* VIEW 5: USER CREDENTIALS TABLE (COACH & STAFF) */}
+            {activeTab === 'users' && canManage && (
               <UserManager
                 users={dbUsers}
                 athletes={athletes}
@@ -309,14 +306,14 @@ function MainAppContent() {
               />
             )}
 
-            {activeTab === 'users' && !isCoach && (
+            {activeTab === 'users' && !canManage && (
               <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-10 text-center max-w-md mx-auto space-y-3 shadow-xl">
                 <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
                   <Shield className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-white font-display">Accesso Riservato al Coach Roberto Florulli</h3>
+                <h3 className="text-base font-bold text-white font-display">Accesso Riservato ad Allenatore e Staff Tecnico</h3>
                 <p className="text-xs text-slate-400">
-                  La gestione credenziali e configurazione account è riservata esclusivamente al Coach Roberto Florulli.
+                  La gestione credenziali e configurazione account è riservata all'allenatore e allo staff tecnico.
                 </p>
                 <button
                   onClick={() => setActiveTab(isAthlete ? 'my_portal' : 'athletes')}
@@ -376,8 +373,8 @@ function MainAppContent() {
           isOpen={Boolean(selectedAthleteModal)}
           onClose={() => setSelectedAthleteModal(null)}
           onSave={handleSaveAthlete}
-          onDelete={handleDeleteAthlete}
-          isCoach={isCoach}
+          onDelete={canManage ? handleDeleteAthlete : undefined}
+          isCoach={canManage}
         />
       )}
 

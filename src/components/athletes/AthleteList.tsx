@@ -27,6 +27,7 @@ import {
   Trash2,
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
+import { useAuth } from '../../context/AuthContext';
 
 import {
   checkAthleteDuplicates,
@@ -49,9 +50,11 @@ export const AthleteList: React.FC<AthleteListProps> = ({
   trainings,
   onSaveAthlete,
   onDeleteAthlete,
-  isCoach,
+  isCoach: isCoachProp,
 }) => {
   const { showToast, confirm } = useDialog();
+  const { isStaff } = useAuth();
+  const isCoach = isCoachProp || isStaff;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedRole, setSelectedRole] = useState<string>('all');

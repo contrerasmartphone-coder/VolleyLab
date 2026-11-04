@@ -44,7 +44,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
     };
   }, [showSwitchDropdown]);
 
-  // Tabs configured strictly by role privileges
+  // Tabs configured strictly by role privileges: Coach e Staff condividono le stesse viste
   const coachTabs = [
     { id: 'athletes', label: 'Atleti', icon: Users },
     { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
@@ -52,11 +52,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
     { id: 'users', label: 'Gestione Utenti', icon: KeyRound },
   ];
 
-  const staffTabs = [
-    { id: 'athletes', label: 'Atleti', icon: Users },
-    { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
-    { id: 'matches', label: 'Calendario', icon: Calendar },
-  ];
+  const staffTabs = coachTabs;
 
   const athleteTabs = [
     { id: 'my_portal', label: 'Il Mio Portale Atleta', icon: Trophy },
@@ -65,7 +61,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
     { id: 'athletes', label: 'Atleti', icon: Users },
   ];
 
-  const currentTabs = isCoach ? coachTabs : isStaff ? staffTabs : athleteTabs;
+  const currentTabs = isCoach || isStaff ? coachTabs : athleteTabs;
 
   return (
     <header className="bg-[#0b0e14]/95 border-b border-slate-800 sticky top-0 z-40 shadow-2xl backdrop-blur-md">

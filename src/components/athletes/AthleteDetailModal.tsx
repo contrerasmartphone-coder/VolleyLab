@@ -44,6 +44,7 @@ import {
   Legend,
 } from 'recharts';
 import { useDialog } from '../../context/DialogContext';
+import { useAuth } from '../../context/AuthContext';
 import {
   checkAthleteDuplicates,
   getWhatsAppLink,
@@ -85,10 +86,12 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
   onClose,
   onSave,
   onDelete,
-  isCoach,
+  isCoach: isCoachProp,
   allAthletes = [],
 }) => {
   const { confirm, showToast } = useDialog();
+  const { isStaff } = useAuth();
+  const isCoach = isCoachProp || isStaff;
   const detailFileInputRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<'profile' | 'injuries' | 'physical' | 'technical' | 'attendance' | 'convocazioni'>('profile');
   const [isEditingProfile, setIsEditingProfile] = useState(false);

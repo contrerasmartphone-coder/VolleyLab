@@ -43,7 +43,8 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
 }) => {
   const { confirm, showToast } = useDialog();
   const isStaff = currentUser?.role === 'staff';
-  const canTakeAttendance = isCoach || isStaff;
+  const canManage = isCoach || isStaff;
+  const canTakeAttendance = canManage;
   const isAthlete = currentUser?.role === 'athlete';
   const [filterStatus, setFilterStatus] = useState<'all' | 'programmato' | 'completato'>('all');
   const [selectedTraining, setSelectedTraining] = useState<TrainingSession | null>(null);
@@ -213,13 +214,13 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              {isCoach
+              {canManage
                 ? 'Pianifica le sessioni settimanali, definisci gli obiettivi tecnici e compila il registro presenze'
                 : 'Iscriviti alle prossime sessioni di allenamento e consulta gli obiettivi e gli esercizi previsti'}
             </p>
           </div>
 
-          {isCoach && (
+          {canManage && (
             <button
               id="create-training-button"
               onClick={() => setShowAddModal(true)}
@@ -464,7 +465,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                {isCoach && onDeleteTraining && (
+                {canManage && onDeleteTraining && (
                   <button
                     onClick={async () => {
                       const confirmed = await confirm({
@@ -500,7 +501,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
 
             {/* Navigation Tabs in Modal */}
             <div className="flex items-center gap-2 px-6 py-2 border-b border-slate-800 bg-[#0b0e14]/60">
-              {isCoach && (
+              {canManage && (
                 <button
                   onClick={() => setActiveTabModal('attendance')}
                   className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
@@ -546,7 +547,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                         Clicca sullo stato per registrare la presenza o assenza di ogni atleta
                       </p>
                     </div>
-                    {isCoach && (
+                    {canManage && (
                       <button
                         onClick={async () => {
                           const confirmed = await confirm({

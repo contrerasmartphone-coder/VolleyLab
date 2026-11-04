@@ -42,6 +42,8 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
   isCoach,
 }) => {
   const { confirm, prompt, showToast } = useDialog();
+  const isStaff = currentUser?.role === 'staff';
+  const canManage = isCoach || isStaff;
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [selectedMatch, setSelectedMatch] = useState<MatchEvent | null>(null);
   const [showAddMatchModal, setShowAddMatchModal] = useState(false);
@@ -244,13 +246,13 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
               </span>
             </div>
             <p className="text-xs text-slate-400">
-              {isCoach
+              {canManage
                 ? 'Gestisci le convocazioni per le partite di campionato, assegna ruoli di formazione e pubblica i tabellini'
                 : 'Consulta le convocazioni ufficiali alle partite, conferma la tua disponibilità e visualizza i dettagli logistici'}
             </p>
           </div>
 
-          {isCoach && (
+          {canManage && (
             <button
               id="add-match-button"
               onClick={() => setShowAddMatchModal(true)}
@@ -393,7 +395,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 </div>
 
                 {/* Athlete Call-up Status Banner */}
-                {!isCoach && myCallUp && (
+                {!canManage && myCallUp && (
                   <div className="mt-3 p-3 rounded-xl border bg-[#0b0e14] border-slate-800 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-300 font-medium">
@@ -460,7 +462,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-[#0b0e14] hover:bg-[#161b26] text-slate-200 border border-slate-700 transition-colors"
                 >
                   <Users className="w-4 h-4 text-amber-400" />
-                  {isCoach ? 'Gestisci Foglio Convocazioni & Risultato' : 'Visualizza Convocazioni & Info Gara'}
+                  {canManage ? 'Gestisci Foglio Convocazioni & Risultato' : 'Visualizza Convocazioni & Info Gara'}
                 </button>
               </div>
             </div>
@@ -495,7 +497,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                {isCoach && onDeleteMatch && (
+                {canManage && onDeleteMatch && (
                   <button
                     onClick={async () => {
                       const confirmed = await confirm({
@@ -562,13 +564,13 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                     <div>
                       <h3 className="text-sm font-bold text-white">Foglio Gara & Convocazioni</h3>
                       <p className="text-xs text-slate-400">
-                        {isCoach
+                        {canManage
                           ? 'Seleziona i giocatori da convocare e assegna i ruoli di formazione (Titolare, Panchina, Capitano, Libero)'
                           : 'Elenco degli atleti convocati per la gara con stato di disponibilità'}
                       </p>
                     </div>
 
-                    {isCoach && (
+                    {canManage && (
                       <div className="flex items-center gap-2">
                         {selectedMatch.callUpStatus === 'bozza' ? (
                           <button
@@ -626,7 +628,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                               <td className="p-3 text-slate-300">{athlete.role}</td>
 
                               <td className="p-3">
-                                {isCoach ? (
+                                {canManage ? (
                                   <button
                                     onClick={() => handleToggleAthleteCallUp(athlete.id)}
                                     className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${
@@ -649,7 +651,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                               </td>
 
                               <td className="p-3">
-                                {isCoach && isCalledUp ? (
+                                {canManage && isCalledUp ? (
                                   <select
                                     value={callUp?.roleInMatch || 'Titolare'}
                                     onChange={(e) => handleChangeRoleInMatch(athlete.id, e.target.value as any)}
@@ -739,7 +741,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         </div>
                       )}
                     </div>
-                  ) : isCoach ? (
+                  ) : canManage ? (
                     <form
                       onSubmit={(e) => {
                         const target = e.target as any;
