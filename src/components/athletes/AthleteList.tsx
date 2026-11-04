@@ -319,7 +319,7 @@ export const AthleteList: React.FC<AthleteListProps> = ({
                 Elenco Atleti
               </h1>
               <span className="px-2.5 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-full">
-                {athletes.length} Giocatori in Rosa
+                {athletes.length === 1 ? '1 Giocatore in Rosa' : `${athletes.length} Giocatori in Rosa`}
               </span>
             </div>
           </div>
@@ -466,9 +466,6 @@ export const AthleteList: React.FC<AthleteListProps> = ({
         <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-12 text-center">
           <Users className="w-10 h-10 text-slate-600 mx-auto mb-3" />
           <h3 className="text-base font-bold text-white">Nessun atleta trovato</h3>
-          <p className="text-xs text-slate-400 mt-1">
-            Modifica i filtri di ricerca o aggiungi un nuovo giocatore alla rosa.
-          </p>
         </div>
       ) : viewMode === 'grid' ? (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">

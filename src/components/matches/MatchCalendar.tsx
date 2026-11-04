@@ -68,6 +68,8 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
 
   // Filter matches
   const nowStr = new Date().toISOString().split('T')[0];
+  const upcomingCount = matches.filter((m) => m.date >= nowStr).length;
+  const pastCount = matches.filter((m) => m.date < nowStr || m.callUpStatus === 'conclusa').length;
   const filteredMatches = matches.filter((m) => {
     if (filterType === 'upcoming') return m.date >= nowStr;
     if (filterType === 'past') return m.date < nowStr || m.callUpStatus === 'conclusa';
@@ -239,17 +241,12 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-2xl font-black text-white font-display tracking-tight">
-                Calendario Partite & Convocazioni Ufficiali
+                Calendario Partite
               </h1>
               <span className="px-2.5 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-full">
-                {matches.length} Gare in Calendario
+                {matches.length === 1 ? '1 Gara in Calendario' : `${matches.length} Gare in Calendario`}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              {canManage
-                ? 'Gestisci le convocazioni per le partite di campionato, assegna ruoli di formazione e pubblica i tabellini'
-                : 'Consulta le convocazioni ufficiali alle partite, conferma la tua disponibilità e visualizza i dettagli logistici'}
-            </p>
           </div>
 
           {canManage && (
@@ -259,7 +256,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
               className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all hover:scale-102"
             >
               <Plus className="w-4 h-4" />
-              Aggiungi Partita
+              Nuova Partita
             </button>
           )}
         </div>
@@ -284,7 +281,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 : 'bg-[#0b0e14] text-slate-400 hover:text-white border border-slate-800'
             }`}
           >
-            Prossime Partite
+            In Programma ({upcomingCount})
           </button>
           <button
             onClick={() => setFilterType('past')}
@@ -294,7 +291,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 : 'bg-[#0b0e14] text-slate-400 hover:text-white border border-slate-800'
             }`}
           >
-            Risultati & Concluse
+            Concluse ({pastCount})
           </button>
         </div>
       </div>
@@ -303,10 +300,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       {filteredMatches.length === 0 ? (
         <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-12 text-center shadow-xl">
           <Calendar className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-white">Nessuna partita a calendario</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-            Non ci sono incontri corrispondenti al filtro selezionato o tutti i match sono stati rimossi.
-          </p>
+          <h3 className="text-base font-bold text-white">Nessuna partita trovata</h3>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -563,11 +557,6 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
                     <div>
                       <h3 className="text-sm font-bold text-white">Foglio Gara & Convocazioni</h3>
-                      <p className="text-xs text-slate-400">
-                        {canManage
-                          ? 'Seleziona i giocatori da convocare e assegna i ruoli di formazione (Titolare, Panchina, Capitano, Libero)'
-                          : 'Elenco degli atleti convocati per la gara con stato di disponibilità'}
-                      </p>
                     </div>
 
                     {canManage && (

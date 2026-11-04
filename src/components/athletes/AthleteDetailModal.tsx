@@ -572,13 +572,13 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
         { subject: 'Tattica', score: latestEval.tacticalIQRating, fullMark: 10 },
       ]
     : [
-        { subject: 'Battuta', score: 7, fullMark: 10 },
-        { subject: 'Ricezione', score: 7, fullMark: 10 },
-        { subject: 'Alzata', score: 6, fullMark: 10 },
-        { subject: 'Attacco', score: 8, fullMark: 10 },
-        { subject: 'Muro', score: 7.5, fullMark: 10 },
-        { subject: 'Difesa', score: 7, fullMark: 10 },
-        { subject: 'Tattica', score: 8, fullMark: 10 },
+        { subject: 'Battuta', score: 0, fullMark: 10 },
+        { subject: 'Ricezione', score: 0, fullMark: 10 },
+        { subject: 'Alzata', score: 0, fullMark: 10 },
+        { subject: 'Attacco', score: 0, fullMark: 10 },
+        { subject: 'Muro', score: 0, fullMark: 10 },
+        { subject: 'Difesa', score: 0, fullMark: 10 },
+        { subject: 'Tattica', score: 0, fullMark: 10 },
       ];
 
   const handleTabChange = (tabId: typeof activeTab) => {
@@ -1981,9 +1981,16 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
               {/* Radar Chart and Details */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 <div className="bg-[#0b0e14] p-5 rounded-2xl border border-slate-800 flex flex-col items-center">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2">
-                    Radar dei Fondamentali
-                  </h4>
+                  <div className="flex items-center justify-between w-full mb-2">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Radar dei Fondamentali
+                    </h4>
+                    {!latestEval && (
+                      <span className="text-[10px] text-slate-500 font-medium bg-[#11141d] px-2 py-0.5 rounded-md border border-slate-800">
+                        Nessuna valutazione
+                      </span>
+                    )}
+                  </div>
                   <div className="w-full h-64">
                     <ResponsiveContainer width="100%" height="100%">
                       <RadarChart data={radarData}>
@@ -1993,9 +2000,9 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
                         <Radar
                           name="Valutazione"
                           dataKey="score"
-                          stroke="#f59e0b"
-                          fill="#f59e0b"
-                          fillOpacity={0.35}
+                          stroke={latestEval ? "#f59e0b" : "transparent"}
+                          fill={latestEval ? "#f59e0b" : "transparent"}
+                          fillOpacity={latestEval ? 0.35 : 0}
                         />
                       </RadarChart>
                     </ResponsiveContainer>

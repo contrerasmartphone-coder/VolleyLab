@@ -190,10 +190,10 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
                 key={tab.id}
                 id={`nav-tab-${tab.id}`}
                 onClick={() => onTabChange(tab.id)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors ${
                   isActive
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#11141d] hover:border hover:border-slate-800'
+                    ? 'bg-amber-500 text-slate-950 font-bold border-amber-500 shadow-md shadow-amber-500/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#11141d] border-transparent hover:border-slate-800'
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />

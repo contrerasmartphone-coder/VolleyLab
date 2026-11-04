@@ -255,7 +255,7 @@ export const UserManager: React.FC<UserManagerProps> = ({
     }
     const message = `Ciao ${user.firstName},
 Ecco le tue credenziali di accesso per l'applicazione VolleyLab:
-URL: https://www.volleylab.vercel.app
+URL: https://volleylab-palermo.vercel.app
 Utente: ${user.username}
 Password: ${user.password || '******'}
 Ti aspettiamo!`;
@@ -535,7 +535,7 @@ Ti aspettiamo!`;
             className="flex items-center justify-center gap-2 px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all hover:scale-102"
           >
             <Plus className="w-4 h-4" />
-            Crea Nuovo Utente
+            Nuovo Utente
           </button>
         </div>
       </div>
