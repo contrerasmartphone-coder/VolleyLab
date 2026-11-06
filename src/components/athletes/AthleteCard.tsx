@@ -122,7 +122,9 @@ export const AthleteCard: React.FC<AthleteCardProps> = ({
             </h3>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[11px] text-slate-400 font-medium">
-                {athlete.heightCm} cm • {athlete.weightKg} kg
+                {athlete.heightCm || athlete.weightKg
+                  ? `${athlete.heightCm ? `${athlete.heightCm} cm` : 'H: N/D'} • ${athlete.weightKg ? `${athlete.weightKg} kg` : 'P: N/D'}`
+                  : 'Fisico: N/D'}
               </span>
             </div>
           </div>

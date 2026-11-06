@@ -5,6 +5,7 @@
     background-color: #0b0e14;
     color: #e2e8f0;
     font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+    transition: background-color 0.25s ease, color 0.25s ease;
   }
   h1, h2, h3, h4, h5, h6, .font-display {
     font-family: 'Outfit', 'Plus Jakarta Sans', sans-serif;
@@ -71,3 +72,182 @@ input[type="month"]::-webkit-calendar-picker-indicator:hover {
   transform: scale(1.15);
 }
 
+/* ==========================================================================
+   TEMA CHIARO (LIGHT MODE) - RIPRISTINO COMPLETO DELLA LEGGIBILITÀ
+   ========================================================================== */
+body.light-theme {
+  background-color: #f1f5f9 !important;
+  color: #0f172a !important;
+}
+
+body.light-theme input[type="date"],
+body.light-theme input[type="time"],
+body.light-theme input[type="datetime-local"],
+body.light-theme input[type="month"] {
+  color-scheme: light !important;
+}
+
+body.light-theme ::-webkit-scrollbar-track {
+  background: #f1f5f9;
+}
+body.light-theme ::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+}
+
+/* Modal Backdrops in Light Mode */
+body.light-theme .fixed.inset-0,
+body.light-theme .bg-slate-950\/80,
+body.light-theme .bg-black\/80 {
+  background-color: rgba(15, 23, 42, 0.5) !important;
+}
+
+/* Background Overrides for Light Mode */
+body.light-theme .modal-banner-gradient {
+  background: linear-gradient(to right, #f8fafc, #ffffff, #f8fafc) !important;
+}
+
+body.light-theme .modal-tab-bar {
+  background-color: #f1f5f9 !important;
+  border-bottom-color: #cbd5e1 !important;
+}
+
+body.light-theme .modal-tab-bar button {
+  color: #475569 !important;
+}
+
+body.light-theme .modal-tab-bar button:hover {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+body.light-theme .modal-tab-bar button[class*="text-amber-400"] {
+  background-color: #fef3c7 !important;
+  color: #b45309 !important;
+  border-color: #fcd34d !important;
+}
+
+body.light-theme .bg-\[\#0b0e14\],
+body.light-theme .bg-\[\#0b0e14\]\/95,
+body.light-theme .bg-\[\#0b0e14\]\/90,
+body.light-theme .bg-\[\#0b0e14\]\/80,
+body.light-theme .bg-\[\#0b0e14\]\/70,
+body.light-theme .bg-\[\#0b0e14\]\/60,
+body.light-theme .bg-\[\#0b0e14\]\/50,
+body.light-theme .bg-\[\#0b0e14\]\/40,
+body.light-theme .bg-\[\#0b0e14\]\/30,
+body.light-theme .bg-slate-950\/60,
+body.light-theme .bg-slate-950\/50,
+body.light-theme .bg-slate-950 {
+  background-color: #f8fafc !important;
+}
+
+body.light-theme .bg-\[\#11141d\],
+body.light-theme .bg-\[\#11141d\]\/95,
+body.light-theme .bg-\[\#11141d\]\/90,
+body.light-theme .bg-slate-900 {
+  background-color: #ffffff !important;
+}
+
+body.light-theme .bg-\[\#161b26\] {
+  background-color: #f1f5f9 !important;
+}
+
+body.light-theme .bg-slate-800,
+body.light-theme .bg-slate-800\/80,
+body.light-theme .bg-slate-800\/60 {
+  background-color: #e2e8f0 !important;
+}
+
+/* Border Overrides */
+body.light-theme .border-slate-800,
+body.light-theme .border-slate-800\/80,
+body.light-theme .border-slate-800\/60,
+body.light-theme .border-slate-800\/50,
+body.light-theme .border-slate-700,
+body.light-theme .border-slate-700\/80 {
+  border-color: #cbd5e1 !important;
+}
+
+/* Text Overrides for High-Contrast Readability */
+body.light-theme .text-white,
+body.light-theme .text-slate-100 {
+  color: #0f172a !important;
+}
+body.light-theme .text-slate-200 {
+  color: #1e293b !important;
+}
+body.light-theme .text-slate-300 {
+  color: #334155 !important;
+}
+body.light-theme .text-slate-400 {
+  color: #475569 !important;
+}
+body.light-theme .text-slate-500 {
+  color: #64748b !important;
+}
+
+/* Accent text colors adapted for light backgrounds */
+body.light-theme .text-amber-400 {
+  color: #d97706 !important;
+}
+body.light-theme .text-amber-300 {
+  color: #b45309 !important;
+}
+body.light-theme .text-cyan-400 {
+  color: #0284c7 !important;
+}
+body.light-theme .text-emerald-400 {
+  color: #059669 !important;
+}
+body.light-theme .text-indigo-400 {
+  color: #4f46e5 !important;
+}
+body.light-theme .text-orange-400 {
+  color: #ea580c !important;
+}
+body.light-theme .text-rose-400 {
+  color: #e11d48 !important;
+}
+
+/* Form Controls in Light Mode */
+body.light-theme input:not([type="checkbox"]):not([type="radio"]):not([type="file"]),
+body.light-theme select,
+body.light-theme textarea {
+  background-color: #ffffff !important;
+  color: #0f172a !important;
+  border-color: #cbd5e1 !important;
+}
+
+body.light-theme input::placeholder,
+body.light-theme textarea::placeholder {
+  color: #94a3b8 !important;
+}
+
+body.light-theme input[type="file"]::file-selector-button {
+  background-color: #e2e8f0 !important;
+  color: #0f172a !important;
+}
+
+/* Interactive Hover States in Light Mode */
+body.light-theme .hover\:bg-\[\#161b26\]:hover {
+  background-color: #f1f5f9 !important;
+}
+body.light-theme .hover\:bg-slate-800:hover {
+  background-color: #e2e8f0 !important;
+}
+body.light-theme .hover\:bg-slate-700:hover {
+  background-color: #cbd5e1 !important;
+}
+
+/* Recharts Charts Support in Light Mode */
+body.light-theme .recharts-text {
+  fill: #334155 !important;
+}
+body.light-theme .recharts-cartesian-grid-line {
+  stroke: #e2e8f0 !important;
+}
+body.light-theme .recharts-default-tooltip {
+  background-color: #ffffff !important;
+  border-color: #cbd5e1 !important;
+  color: #0f172a !important;
+}

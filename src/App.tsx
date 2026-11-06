@@ -1,12 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DialogProvider } from './context/DialogContext';
+import { ThemeProvider } from './context/ThemeContext';
 import { Header } from './components/common/Header';
 import { AthleteList } from './components/athletes/AthleteList';
 import { TrainingManager } from './components/trainings/TrainingManager';
 import { ProgressDashboard } from './components/progress/ProgressDashboard';
 import { MatchCalendar } from './components/matches/MatchCalendar';
 import { UserManager } from './components/users/UserManager';
+import { SettingsManager } from './components/settings/SettingsManager';
 import { AthletePortal } from './components/dashboard/AthletePortal';
 import { AthleteDetailModal } from './components/athletes/AthleteDetailModal';
 import { LoginModal } from './components/auth/LoginModal';
@@ -33,7 +35,7 @@ function MainAppContent() {
   const canManage = isCoach || isStaff || Boolean(canManageAll);
 
   // Active Tab state
-  const [activeTab, setActiveTab] = useState<'athletes' | 'trainings' | 'matches' | 'users' | 'my_portal'>('athletes');
+  const [activeTab, setActiveTab] = useState<'athletes' | 'trainings' | 'matches' | 'users' | 'settings' | 'my_portal'>('athletes');
 
   // Real-time Database State
   const [athletes, setAthletes] = useState<Athlete[]>([]);
@@ -324,7 +326,36 @@ function MainAppContent() {
               </div>
             )}
 
-            {/* VIEW 6: DEDICATED ATHLETE PORTAL */}
+            {/* VIEW 6: SETTINGS & BACKUP/RESTORE (COACH & STAFF) */}
+            {activeTab === 'settings' && canManage && (
+              <SettingsManager
+                athletes={athletes}
+                trainings={trainings}
+                matches={matches}
+                users={dbUsers}
+                currentUser={currentUser}
+              />
+            )}
+
+            {activeTab === 'settings' && !canManage && (
+              <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-10 text-center max-w-md mx-auto space-y-3 shadow-xl">
+                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
+                  <Shield className="w-6 h-6" />
+                </div>
+                <h3 className="text-base font-bold text-white font-display">Accesso Riservato ad Allenatore e Staff Tecnico</h3>
+                <p className="text-xs text-slate-400">
+                  La gestione backup e sicurezza del database è riservata all'allenatore e allo staff tecnico.
+                </p>
+                <button
+                  onClick={() => setActiveTab(isAthlete ? 'my_portal' : 'athletes')}
+                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer"
+                >
+                  Torna alla Dashboard
+                </button>
+              </div>
+            )}
+
+            {/* VIEW 7: DEDICATED ATHLETE PORTAL */}
             {activeTab === 'my_portal' && (
               <AthletePortal
                 athlete={currentAthleteRecord}
@@ -394,10 +425,12 @@ function MainAppContent() {
 
 export default function App() {
   return (
-    <AuthProvider>
-      <DialogProvider>
-        <MainAppContent />
-      </DialogProvider>
-    </AuthProvider>
+    <ThemeProvider>
+      <AuthProvider>
+        <DialogProvider>
+          <MainAppContent />
+        </DialogProvider>
+      </AuthProvider>
+    </ThemeProvider>
   );
 }

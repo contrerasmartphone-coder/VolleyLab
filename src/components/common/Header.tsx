@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import {
   Users,
   Calendar,
@@ -15,6 +16,9 @@ import {
   KeyRound,
   CheckCircle,
   Briefcase,
+  Settings,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
 
@@ -26,6 +30,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLogin }) => {
   const { currentUser, allUsers, isCoach, isStaff, isAthlete, switchUser, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { confirm, showToast } = useDialog();
   const [showSwitchDropdown, setShowSwitchDropdown] = useState(false);
 
@@ -50,6 +55,7 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
     { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
     { id: 'matches', label: 'Calendario', icon: Calendar },
     { id: 'users', label: 'Gestione Utenti', icon: KeyRound },
+    { id: 'settings', label: 'Impostazioni', icon: Settings },
   ];
 
   const staffTabs = coachTabs;
@@ -77,8 +83,22 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
             </span>
           </div>
 
-          {/* Active Profile */}
+          {/* Active Profile & Theme Toggle */}
           <div className="flex items-center gap-2">
+            {/* Theme Selector Icon Button */}
+            <button
+              id="theme-toggle-button"
+              onClick={toggleTheme}
+              className="p-2 sm:p-2.5 bg-[#11141d] hover:bg-[#161b26] border border-slate-800 hover:border-slate-700 rounded-2xl transition-all shadow-md cursor-pointer flex items-center justify-center text-xs font-bold"
+              title={theme === 'dark' ? 'Passa al Tema Chiaro' : 'Passa al Tema Scuro'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4.5 h-4.5 text-amber-400 shrink-0" />
+              ) : (
+                <Moon className="w-4.5 h-4.5 text-indigo-600 shrink-0" />
+              )}
+            </button>
+
             {currentUser ? (
               <div className="relative">
                 <button

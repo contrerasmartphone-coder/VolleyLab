@@ -137,9 +137,9 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
               </p>
 
               <div className="flex items-center gap-4 mt-3 text-xs text-slate-300">
-                <span>Altezza: <strong className="text-white">{athlete.heightCm} cm</strong></span>
-                <span>Peso: <strong className="text-white">{athlete.weightKg} kg</strong></span>
-                <span>Salto Attacco: <strong className="text-orange-400">{athlete.spikeReachCm} cm</strong></span>
+                <span>Altezza: <strong className="text-white">{athlete.heightCm ? `${athlete.heightCm} cm` : 'N/D'}</strong></span>
+                <span>Peso: <strong className="text-white">{athlete.weightKg ? `${athlete.weightKg} kg` : 'N/D'}</strong></span>
+                <span>Salto Attacco: <strong className="text-orange-400">{athlete.spikeReachCm ? `${athlete.spikeReachCm} cm` : 'N/D'}</strong></span>
               </div>
             </div>
           </div>

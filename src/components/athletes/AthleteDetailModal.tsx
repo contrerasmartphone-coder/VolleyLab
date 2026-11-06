@@ -27,7 +27,9 @@ import {
   Shield,
   Trash2,
   Upload,
+  Camera,
 } from 'lucide-react';
+import { CameraCaptureModal } from '../common/CameraCaptureModal';
 import {
   ResponsiveContainer,
   LineChart,
@@ -93,6 +95,7 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
   const { isStaff } = useAuth();
   const isCoach = isCoachProp || isStaff;
   const detailFileInputRef = useRef<HTMLInputElement>(null);
+  const [showCameraModal, setShowCameraModal] = useState(false);
   const [activeTab, setActiveTab] = useState<'profile' | 'injuries' | 'physical' | 'technical' | 'attendance' | 'convocazioni'>('profile');
   const [isEditingProfile, setIsEditingProfile] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
@@ -186,7 +189,7 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
     weightKg: athlete.weightKg,
     spikeReachCm: athlete.spikeReachCm,
     blockReachCm: athlete.blockReachCm,
-    verticalJumpCm: athlete.spikeReachCm - athlete.heightCm,
+    verticalJumpCm: (athlete.spikeReachCm && athlete.heightCm) ? athlete.spikeReachCm - athlete.heightCm : undefined,
     notes: '',
   });
 
@@ -252,6 +255,10 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
     const normalizedData: Athlete = {
       ...formData,
       phone: normalizePhoneDisplay(rawPhone),
+      heightCm: formData.heightCm ? Number(formData.heightCm) : undefined,
+      weightKg: formData.weightKg ? Number(formData.weightKg) : undefined,
+      spikeReachCm: formData.spikeReachCm ? Number(formData.spikeReachCm) : undefined,
+      blockReachCm: formData.blockReachCm ? Number(formData.blockReachCm) : undefined,
     };
 
     setIsSaving(true);
@@ -350,10 +357,12 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
     const entry: PhysicalProgressEntry = {
       id: `prog-${Date.now()}`,
       date: newPhysical.date || new Date().toISOString().split('T')[0],
-      weightKg: Number(newPhysical.weightKg) || athlete.weightKg,
-      spikeReachCm: Number(newPhysical.spikeReachCm) || athlete.spikeReachCm,
-      blockReachCm: Number(newPhysical.blockReachCm) || athlete.blockReachCm,
-      verticalJumpCm: Number(newPhysical.verticalJumpCm) || (Number(newPhysical.spikeReachCm) || athlete.spikeReachCm) - athlete.heightCm,
+      weightKg: newPhysical.weightKg ? Number(newPhysical.weightKg) : undefined,
+      spikeReachCm: newPhysical.spikeReachCm ? Number(newPhysical.spikeReachCm) : undefined,
+      blockReachCm: newPhysical.blockReachCm ? Number(newPhysical.blockReachCm) : undefined,
+      verticalJumpCm: (newPhysical.spikeReachCm && athlete.heightCm)
+        ? Number(newPhysical.spikeReachCm) - Number(athlete.heightCm)
+        : undefined,
       notes: newPhysical.notes || '',
     };
 
@@ -590,28 +599,42 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
   };
 
   return (
-    <div
-      className="fixed inset-0 z-50 overflow-y-auto bg-[#0b0e14]/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
-      onClick={onClose}
-    >
+    <>
       <div
-        id="athlete-detail-modal"
-        className="bg-[#11141d] border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
-        onClick={(e) => e.stopPropagation()}
+        className="fixed inset-0 z-50 overflow-y-auto bg-[#0b0e14]/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
+        onClick={onClose}
       >
-        {/* Modal Top Header with Athlete Banner */}
-        <div className="relative bg-gradient-to-r from-[#0b0e14] via-[#11141d] to-[#0b0e14] p-6 border-b border-slate-800 flex items-start justify-between gap-4">
-          <div className="flex items-center gap-4">
-            <div className="relative">
-              <img
-                src={athlete.photoUrl || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80'}
-                alt={`${athlete.firstName} ${athlete.lastName}`}
-                className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover ring-2 ring-amber-500/40 shadow-lg"
-              />
-              <span className="absolute -bottom-2 -right-2 w-8 h-8 rounded-xl bg-amber-500 text-slate-950 border-2 border-[#11141d] flex items-center justify-center font-black text-sm shadow-md">
-                #{athlete.jerseyNumber}
-              </span>
-            </div>
+        <div
+          id="athlete-detail-modal"
+          className="bg-[#11141d] border border-slate-800 rounded-3xl w-full max-w-4xl max-h-[90vh] flex flex-col shadow-2xl overflow-hidden"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {/* Modal Top Header with Athlete Banner */}
+          <div className="relative modal-banner-gradient bg-gradient-to-r from-[#0b0e14] via-[#11141d] to-[#0b0e14] p-6 border-b border-slate-800 flex items-start justify-between gap-4">
+            <div className="flex items-center gap-4">
+              <div className="relative group">
+                <img
+                  src={athlete.photoUrl || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=200&q=80'}
+                  alt={`${athlete.firstName} ${athlete.lastName}`}
+                  className="w-16 h-16 sm:w-20 sm:h-20 rounded-2xl object-cover ring-2 ring-amber-500/40 shadow-lg"
+                />
+                <span className="absolute -bottom-2 -right-2 w-8 h-8 rounded-xl bg-amber-500 text-slate-950 border-2 border-[#11141d] flex items-center justify-center font-black text-sm shadow-md">
+                  #{athlete.jerseyNumber}
+                </span>
+                {isCoach && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setShowCameraModal(true);
+                    }}
+                    className="absolute -top-1.5 -left-1.5 p-1.5 bg-[#11141d]/90 hover:bg-amber-500 text-slate-300 hover:text-slate-950 rounded-xl border border-slate-700 hover:border-amber-400 transition-all shadow-lg cursor-pointer group-hover:scale-110"
+                    title="Scatta o aggiorna foto con fotocamera"
+                  >
+                    <Camera className="w-3.5 h-3.5" />
+                  </button>
+                )}
+              </div>
 
             <div>
               <div className="flex items-center gap-2 flex-wrap">
@@ -673,7 +696,7 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
         </div>
 
         {/* Navigation Tabs inside modal */}
-        <div className="h-14 shrink-0 flex items-center gap-2 px-6 border-b border-slate-800 bg-[#0b0e14]/60 overflow-x-auto no-scrollbar">
+        <div className="h-14 shrink-0 flex items-center gap-2 px-6 border-b border-slate-800 bg-[#0b0e14]/60 overflow-x-auto no-scrollbar modal-tab-bar">
           {[
             { id: 'profile', label: 'Scheda', icon: User },
             { id: 'injuries', label: `Infortuni (${athlete.injuries?.length || 0})`, icon: HeartPulse },
@@ -987,7 +1010,7 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
                             className="hidden"
                             onChange={handleDetailFileUpload}
                           />
-                          <div className="flex items-center gap-3">
+                          <div className="flex items-center gap-3 flex-wrap">
                             <img
                               src={formData.photoUrl || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80'}
                               alt="Preview Avatar"
@@ -1000,6 +1023,14 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
                             >
                               <Upload className="w-4 h-4" />
                               Carica Foto JPG / PNG
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setShowCameraModal(true)}
+                              className="flex items-center gap-2 px-3.5 py-2 bg-[#161b26] hover:bg-slate-800 text-emerald-400 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                            >
+                              <Camera className="w-4 h-4" />
+                              Scatta con Fotocamera
                             </button>
                           </div>
                         </div>
@@ -1121,19 +1152,27 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
                       <div className="grid grid-cols-2 gap-3 text-xs">
                         <div className="p-3 bg-[#11141d] rounded-xl border border-slate-800">
                           <span className="text-slate-400 block">Altezza</span>
-                          <span className="font-bold text-white text-base">{athlete.heightCm} <span className="text-[10px] font-normal">cm</span></span>
+                          <span className="font-bold text-white text-base">
+                            {athlete.heightCm ? <>{athlete.heightCm} <span className="text-[10px] font-normal">cm</span></> : <span className="text-slate-500 font-normal">N/D</span>}
+                          </span>
                         </div>
                         <div className="p-3 bg-[#11141d] rounded-xl border border-slate-800">
                           <span className="text-slate-400 block">Peso</span>
-                          <span className="font-bold text-white text-base">{athlete.weightKg} <span className="text-[10px] font-normal">kg</span></span>
+                          <span className="font-bold text-white text-base">
+                            {athlete.weightKg ? <>{athlete.weightKg} <span className="text-[10px] font-normal">kg</span></> : <span className="text-slate-500 font-normal">N/D</span>}
+                          </span>
                         </div>
                         <div className="p-3 bg-[#11141d] rounded-xl border border-slate-800">
                           <span className="text-slate-400 block">Salto Attacco</span>
-                          <span className="font-bold text-amber-400 text-base">{athlete.spikeReachCm} <span className="text-[10px] font-normal">cm</span></span>
+                          <span className="font-bold text-amber-400 text-base">
+                            {athlete.spikeReachCm ? <>{athlete.spikeReachCm} <span className="text-[10px] font-normal">cm</span></> : <span className="text-slate-500 font-normal">N/D</span>}
+                          </span>
                         </div>
                         <div className="p-3 bg-[#11141d] rounded-xl border border-slate-800">
                           <span className="text-slate-400 block">Salto Muro</span>
-                          <span className="font-bold text-cyan-400 text-base">{athlete.blockReachCm} <span className="text-[10px] font-normal">cm</span></span>
+                          <span className="font-bold text-cyan-400 text-base">
+                            {athlete.blockReachCm ? <>{athlete.blockReachCm} <span className="text-[10px] font-normal">cm</span></> : <span className="text-slate-500 font-normal">N/D</span>}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -1792,10 +1831,12 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
                       athlete.physicalProgress.map((p) => (
                         <tr key={p.id} className="hover:bg-[#11141d]/60">
                           <td className="p-3 font-semibold text-white">{formatDateDDMMYYYY(p.date)}</td>
-                          <td className="p-3 font-bold text-amber-400">{p.spikeReachCm} cm</td>
-                          <td className="p-3 font-bold text-cyan-400">{p.blockReachCm} cm</td>
-                          <td className="p-3 text-slate-300">{p.weightKg} kg</td>
-                          <td className="p-3 text-emerald-400 font-bold">+{p.spikeReachCm - athlete.heightCm} cm</td>
+                          <td className="p-3 font-bold text-amber-400">{p.spikeReachCm ? `${p.spikeReachCm} cm` : 'N/D'}</td>
+                          <td className="p-3 font-bold text-cyan-400">{p.blockReachCm ? `${p.blockReachCm} cm` : 'N/D'}</td>
+                          <td className="p-3 text-slate-300">{p.weightKg ? `${p.weightKg} kg` : 'N/D'}</td>
+                          <td className="p-3 text-emerald-400 font-bold">
+                            {p.spikeReachCm && athlete.heightCm ? `+${p.spikeReachCm - athlete.heightCm} cm` : 'N/D'}
+                          </td>
                           <td className="p-3 text-slate-400 italic">{p.notes || '-'}</td>
                           {isCoach && (
                             <td className="p-3 text-right">
@@ -2279,5 +2320,21 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
         </div>
       </div>
     </div>
-  );
+
+    <CameraCaptureModal
+      isOpen={showCameraModal}
+      onClose={() => setShowCameraModal(false)}
+      onCapture={async (dataUrl) => {
+        setFormData((prev) => ({ ...prev, photoUrl: dataUrl }));
+        try {
+          await onSave({ ...athlete, photoUrl: dataUrl });
+          showToast({ message: 'Foto profilo scattata e salvata con successo!', type: 'success' });
+        } catch (err) {
+          console.error('Error auto-saving captured photo:', err);
+          showToast({ message: 'Foto scattata con successo!', type: 'success' });
+        }
+      }}
+    />
+  </>
+);
 };

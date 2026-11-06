@@ -90,10 +90,10 @@ export interface Athlete {
   role: AthleteRole;
   secondaryRole?: AthleteRole;
   birthDate: string;
-  heightCm: number;
-  weightKg: number;
-  spikeReachCm: number;
-  blockReachCm: number;
+  heightCm?: number;
+  weightKg?: number;
+  spikeReachCm?: number;
+  blockReachCm?: number;
   medicalCertExpiry: string;
   medicalCertValid: boolean;
   phone: string;

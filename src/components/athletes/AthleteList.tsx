@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
 import { useAuth } from '../../context/AuthContext';
+import { CameraCaptureModal } from '../common/CameraCaptureModal';
 
 import {
   checkAthleteDuplicates,
@@ -89,6 +90,7 @@ export const AthleteList: React.FC<AthleteListProps> = ({
 
   // New Athlete Modal
   const [showAddModal, setShowAddModal] = useState(false);
+  const [showCameraModal, setShowCameraModal] = useState(false);
   const [newAthleteData, setNewAthleteData] = useState<Partial<Athlete>>(getEmptyAthleteForm());
 
   const handleOpenAddModal = () => {
@@ -182,8 +184,11 @@ export const AthleteList: React.FC<AthleteListProps> = ({
   const totalCount = athletes.length;
   const activeCount = athletes.filter((a) => a.status === 'attivo').length;
   const injuredCount = athletes.filter((a) => a.status === 'infortunato' || a.status === 'in_recupero').length;
-  const avgHeight = Math.round(athletes.reduce((acc, a) => acc + a.heightCm, 0) / (athletes.length || 1));
-  const maxBlock = Math.max(...athletes.map((a) => a.blockReachCm), 0);
+  const athletesWithHeight = athletes.filter((a) => a.heightCm && Number(a.heightCm) > 0);
+  const avgHeight = athletesWithHeight.length > 0
+    ? Math.round(athletesWithHeight.reduce((acc, a) => acc + Number(a.heightCm), 0) / athletesWithHeight.length)
+    : null;
+  const maxBlock = Math.max(...athletes.map((a) => a.blockReachCm || 0), 0);
 
   const handleCreateAthlete = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -227,6 +232,8 @@ export const AthleteList: React.FC<AthleteListProps> = ({
 
     const normalizedPhone = normalizePhoneDisplay(rawPhone);
 
+    const hasPhysData = Boolean(newAthleteData.weightKg || newAthleteData.spikeReachCm || newAthleteData.blockReachCm);
+
     const newAthlete: Athlete = {
       id: `ath-${Date.now()}`,
       firstName: newAthleteData.firstName?.trim() || '',
@@ -235,10 +242,10 @@ export const AthleteList: React.FC<AthleteListProps> = ({
       jerseyNumber: Number(newAthleteData.jerseyNumber) || 1,
       role: (newAthleteData.role as AthleteRole) || 'Schiacciatore',
       birthDate: newAthleteData.birthDate || '2002-01-01',
-      heightCm: Number(newAthleteData.heightCm) || 190,
-      weightKg: Number(newAthleteData.weightKg) || 80,
-      spikeReachCm: Number(newAthleteData.spikeReachCm) || 330,
-      blockReachCm: Number(newAthleteData.blockReachCm) || 310,
+      heightCm: newAthleteData.heightCm ? Number(newAthleteData.heightCm) : undefined,
+      weightKg: newAthleteData.weightKg ? Number(newAthleteData.weightKg) : undefined,
+      spikeReachCm: newAthleteData.spikeReachCm ? Number(newAthleteData.spikeReachCm) : undefined,
+      blockReachCm: newAthleteData.blockReachCm ? Number(newAthleteData.blockReachCm) : undefined,
       medicalCertExpiry: newAthleteData.medicalCertExpiry || '2027-01-01',
       medicalCertValid: true,
       phone: normalizedPhone,
@@ -265,17 +272,19 @@ export const AthleteList: React.FC<AthleteListProps> = ({
         receptionErrors: 0,
         digsTotal: 0,
       },
-      physicalProgress: [
+      physicalProgress: hasPhysData ? [
         {
           id: `prog-${Date.now()}`,
           date: new Date().toISOString().split('T')[0],
-          weightKg: Number(newAthleteData.weightKg) || 80,
-          spikeReachCm: Number(newAthleteData.spikeReachCm) || 330,
-          blockReachCm: Number(newAthleteData.blockReachCm) || 310,
-          verticalJumpCm: (Number(newAthleteData.spikeReachCm) || 330) - (Number(newAthleteData.heightCm) || 190),
+          weightKg: newAthleteData.weightKg ? Number(newAthleteData.weightKg) : undefined,
+          spikeReachCm: newAthleteData.spikeReachCm ? Number(newAthleteData.spikeReachCm) : undefined,
+          blockReachCm: newAthleteData.blockReachCm ? Number(newAthleteData.blockReachCm) : undefined,
+          verticalJumpCm: (newAthleteData.spikeReachCm && newAthleteData.heightCm)
+            ? Number(newAthleteData.spikeReachCm) - Number(newAthleteData.heightCm)
+            : undefined,
           notes: 'Test iniziale ingresso in rosa',
         },
-      ],
+      ] : [],
       technicalEvaluations: [],
       injuries: [],
     };
@@ -364,7 +373,7 @@ export const AthleteList: React.FC<AthleteListProps> = ({
             </div>
             <div>
               <span className="text-[10px] text-slate-400 block font-medium">Altezza Media Squadra</span>
-              <span className="text-base font-bold text-white">{avgHeight} cm</span>
+              <span className="text-base font-bold text-white">{avgHeight ? `${avgHeight} cm` : 'N/D'}</span>
             </div>
           </div>
 
@@ -542,7 +551,9 @@ export const AthleteList: React.FC<AthleteListProps> = ({
                       </span>
                     </td>
                     <td className="p-3.5 text-slate-300">
-                      {ath.heightCm} cm • {ath.weightKg} kg
+                      {ath.heightCm || ath.weightKg
+                        ? `${ath.heightCm ? `${ath.heightCm} cm` : '—'} • ${ath.weightKg ? `${ath.weightKg} kg` : '—'}`
+                        : 'N/D'}
                     </td>
                     <td className="p-3.5">
                       <span
@@ -953,7 +964,7 @@ export const AthleteList: React.FC<AthleteListProps> = ({
                         className="hidden"
                         onChange={handleFileUpload}
                       />
-                      <div className="flex items-center gap-3">
+                      <div className="flex items-center gap-3 flex-wrap">
                         <img
                           src={newAthleteData.photoUrl || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=400&q=80'}
                           alt="Preview Avatar"
@@ -967,9 +978,14 @@ export const AthleteList: React.FC<AthleteListProps> = ({
                           <Upload className="w-4 h-4" />
                           Carica Foto JPG / PNG
                         </button>
-                        <span className="text-[11px] text-slate-500 hidden sm:inline">
-                          Seleziona un file dal tuo dispositivo
-                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setShowCameraModal(true)}
+                          className="flex items-center gap-2 px-3.5 py-2 bg-[#161b26] hover:bg-slate-800 text-emerald-400 border border-slate-700 rounded-xl text-xs font-semibold transition-colors cursor-pointer"
+                        >
+                          <Camera className="w-4 h-4" />
+                          Scatta con Fotocamera
+                        </button>
                       </div>
                     </div>
 
@@ -1008,6 +1024,15 @@ export const AthleteList: React.FC<AthleteListProps> = ({
           </div>
         </div>
       )}
+
+      <CameraCaptureModal
+        isOpen={showCameraModal}
+        onClose={() => setShowCameraModal(false)}
+        onCapture={(dataUrl) => {
+          setNewAthleteData((prev) => ({ ...prev, photoUrl: dataUrl }));
+          showToast({ message: 'Foto scattata con successo!', type: 'success' });
+        }}
+      />
     </div>
   );
 };
