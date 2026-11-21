@@ -64,7 +64,6 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
     { id: 'my_portal', label: 'Il Mio Portale Atleta', icon: Trophy },
     { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
     { id: 'matches', label: 'Calendario', icon: Calendar },
-    { id: 'athletes', label: 'Atleti', icon: Users },
   ];
 
   const currentTabs = isCoach || isStaff ? coachTabs : athleteTabs;

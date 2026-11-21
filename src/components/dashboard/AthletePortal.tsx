@@ -65,10 +65,11 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
     );
   }
 
-  // Upcoming trainings (next 5)
+  // Upcoming trainings (next 4 in chronological order)
   const nowStr = new Date().toISOString().split('T')[0];
   const upcomingTrainings = trainings
-    .filter((t) => t.date >= nowStr || t.status === 'programmato')
+    .filter((t) => t.date >= nowStr && t.status === 'programmato')
+    .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 4);
 
   // Upcoming matches with call-up for this athlete
@@ -132,8 +133,14 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                {athlete.category} • Visita medica valida fino al{' '}
-                <strong className="text-emerald-400">{athlete.medicalCertExpiry}</strong>
+                {athlete.medicalCertExpiry ? (
+                  <>
+                    Visita medica valida fino al{' '}
+                    <strong className="text-emerald-400">{athlete.medicalCertExpiry}</strong>
+                  </>
+                ) : (
+                  <span className="text-slate-500">Scadenza visita medica non specificata</span>
+                )}
               </p>
 
               <div className="flex items-center gap-4 mt-3 text-xs text-slate-300">

@@ -21,6 +21,9 @@ import {
   AlertOctagon,
   UserX,
   CopyX,
+  Wand2,
+  Copy,
+  Check,
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
 import {
@@ -233,6 +236,28 @@ export const UserManager: React.FC<UserManagerProps> = ({
   const [duplicateConflicts, setDuplicateConflicts] = useState<DuplicateUserConflict[]>([]);
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [lastAutoUsername, setLastAutoUsername] = useState('');
+
+  const formatUsernamePart = (val: string): string => {
+    return (val || '')
+      .trim()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .split(/\s+/)
+      .map((word) => {
+        const clean = word.replace(/[^a-zA-Z0-9_-]/g, '');
+        if (!clean) return '';
+        return clean.charAt(0).toUpperCase() + clean.slice(1);
+      })
+      .filter(Boolean)
+      .join('');
+  };
+
+  const buildAthleteUsername = (firstName: string, lastName: string): string => {
+    return [formatUsernamePart(firstName), formatUsernamePart(lastName)]
+      .filter(Boolean)
+      .join('.');
+  };
 
   const [formData, setFormData] = useState<Partial<User>>({
     username: '',
@@ -263,9 +288,80 @@ Ti aspettiamo!`;
     window.open(waUrl, '_blank');
   };
 
+  const generateRandomPassword = (length = 10): string => {
+    const upper = 'ABCDEFGHJKLMNPQRSTUVWXYZ';
+    const lower = 'abcdefghjkmnpqrstuvwxyz';
+    const digits = '23456789';
+    const symbols = '!@#?';
+    const all = upper + lower + digits + symbols;
+
+    const getRandomChar = (charset: string) => {
+      if (typeof window !== 'undefined' && window.crypto?.getRandomValues) {
+        const arr = new Uint32Array(1);
+        window.crypto.getRandomValues(arr);
+        return charset[arr[0] % charset.length];
+      }
+      return charset[Math.floor(Math.random() * charset.length)];
+    };
+
+    const chars = [
+      getRandomChar(upper),
+      getRandomChar(lower),
+      getRandomChar(digits),
+      getRandomChar(symbols),
+    ];
+    for (let i = chars.length; i < length; i++) {
+      chars.push(getRandomChar(all));
+    }
+
+    // Fisher-Yates shuffle
+    for (let i = chars.length - 1; i > 0; i--) {
+      const j =
+        typeof window !== 'undefined' && window.crypto?.getRandomValues
+          ? window.crypto.getRandomValues(new Uint32Array(1))[0] % (i + 1)
+          : Math.floor(Math.random() * (i + 1));
+      [chars[i], chars[j]] = [chars[j], chars[i]];
+    }
+    return chars.join('');
+  };
+
+  const [copiedPassword, setCopiedPassword] = useState(false);
+
+  const handleGeneratePassword = () => {
+    const generated = generateRandomPassword(10);
+    setFormData((prev) => ({ ...prev, password: generated }));
+    setShowPassword(true);
+    setCopiedPassword(false);
+    showToast({
+      message: 'Password sicura generata automaticamente!',
+      type: 'success',
+    });
+  };
+
+  const handleCopyPassword = async () => {
+    if (!formData.password) return;
+    try {
+      await navigator.clipboard.writeText(formData.password);
+      setCopiedPassword(true);
+      setTimeout(() => setCopiedPassword(false), 2000);
+      showToast({
+        message: 'Password copiata negli appunti',
+        type: 'info',
+      });
+    } catch {
+      showToast({
+        message: 'Impossibile copiare automaticamente la password',
+        type: 'warning',
+      });
+    }
+  };
+
   const handleOpenCreate = () => {
     setIsSubmitting(false);
     setEditingUser(null);
+    setShowPassword(false);
+    setCopiedPassword(false);
+    setLastAutoUsername('');
     setFormData({
       username: '',
       password: '',
@@ -282,6 +378,7 @@ Ti aspettiamo!`;
   const handleOpenEdit = (user: User) => {
     setIsSubmitting(false);
     setEditingUser(user);
+    setLastAutoUsername('');
     setFormData({
       ...user,
       firstName: user.firstName || '',
@@ -295,7 +392,14 @@ Ti aspettiamo!`;
 
   const handleSelectAthlete = (athleteId: string) => {
     if (!athleteId) {
-      setFormData((prev) => ({ ...prev, athleteId: '' }));
+      setFormData((prev) => ({
+        ...prev,
+        athleteId: '',
+        username: !editingUser && lastAutoUsername && prev.username === lastAutoUsername ? '' : prev.username,
+      }));
+      if (!editingUser) {
+        setLastAutoUsername('');
+      }
       return;
     }
 
@@ -312,11 +416,22 @@ Ti aspettiamo!`;
       setConflictFields(detected);
       setShowConflictModal(true);
     } else {
+      const nextFirstName = formData.firstName?.trim() || found.firstName;
+      const nextLastName = formData.lastName?.trim() || found.lastName;
+      const autoUsername = buildAthleteUsername(nextFirstName, nextLastName);
+      const shouldAutoFillUsername =
+        !editingUser && (!formData.username?.trim() || formData.username === lastAutoUsername);
+
+      if (shouldAutoFillUsername && autoUsername) {
+        setLastAutoUsername(autoUsername);
+      }
+
       setFormData((prev) => ({
         ...prev,
         athleteId: found.id,
         firstName: prev.firstName?.trim() || found.firstName,
         lastName: prev.lastName?.trim() || found.lastName,
+        username: shouldAutoFillUsername && autoUsername ? autoUsername : prev.username,
         phone: prev.phone?.trim() || found.phone || '',
         email: prev.email?.trim() || found.email || '',
       }));
@@ -345,11 +460,20 @@ Ti aspettiamo!`;
       resolvedValues[c.field] = val;
     });
 
+    const autoUsername = buildAthleteUsername(resolvedValues.firstName, resolvedValues.lastName);
+    const shouldAutoFillUsername =
+      !editingUser && (!formData.username?.trim() || formData.username === lastAutoUsername);
+
+    if (shouldAutoFillUsername && autoUsername) {
+      setLastAutoUsername(autoUsername);
+    }
+
     const updatedUserForm: Partial<User> = {
       ...formData,
       athleteId: pendingAthlete.id,
       firstName: resolvedValues.firstName,
       lastName: resolvedValues.lastName,
+      username: shouldAutoFillUsername && autoUsername ? autoUsername : formData.username,
       phone: resolvedValues.phone,
       email: resolvedValues.email,
     };
@@ -891,23 +1015,54 @@ Ti aspettiamo!`;
                 </div>
 
                 <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Password di Accesso *</label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-slate-400 font-medium">Password di Accesso *</label>
+                    <button
+                      type="button"
+                      id="generate-password-button"
+                      onClick={handleGeneratePassword}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded-lg bg-amber-500/15 hover:bg-amber-500/25 text-amber-400 border border-amber-500/30 text-[10px] font-bold transition-colors cursor-pointer"
+                      title="Genera automaticamente una password casuale sicura"
+                    >
+                      <Wand2 className="w-3 h-3" />
+                      Genera
+                    </button>
+                  </div>
                   <div className="relative">
                     <input
                       type={showPassword ? 'text' : 'password'}
                       required
-                      placeholder="Password sicura"
+                      placeholder="Password sicura o genera"
                       value={formData.password}
                       onChange={(e) => setFormData({ ...formData, password: e.target.value })}
-                      className="w-full bg-[#0b0e14] border border-slate-700/80 rounded-xl px-3 py-2 text-white pr-9 focus:outline-none focus:border-amber-500"
+                      className={`w-full bg-[#0b0e14] border border-slate-700/80 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500 ${
+                        formData.password ? 'pr-16' : 'pr-9'
+                      }`}
                     />
-                    <button
-                      type="button"
-                      onClick={() => setShowPassword(!showPassword)}
-                      className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-                    >
-                      {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-                    </button>
+                    <div className="absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center gap-1.5">
+                      {formData.password && (
+                        <button
+                          type="button"
+                          onClick={handleCopyPassword}
+                          className="text-slate-500 hover:text-amber-400 transition-colors cursor-pointer"
+                          title="Copia password"
+                        >
+                          {copiedPassword ? (
+                            <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          ) : (
+                            <Copy className="w-3.5 h-3.5" />
+                          )}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setShowPassword(!showPassword)}
+                        className="text-slate-500 hover:text-slate-300 transition-colors cursor-pointer"
+                        title={showPassword ? 'Nascondi password' : 'Mostra password'}
+                      >
+                        {showPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
                   </div>
                 </div>
               </div>

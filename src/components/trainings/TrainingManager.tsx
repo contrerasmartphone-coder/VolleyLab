@@ -88,11 +88,18 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
   // Helper for current athlete's ID
   const currentAthleteId = currentUser?.role === 'athlete' ? currentUser.athleteId : null;
 
-  // Filter trainings
-  const filteredTrainings = trainings.filter((t) => {
-    if (filterStatus === 'all') return true;
-    return t.status === filterStatus;
-  });
+  // Filter & sort trainings (upcoming chronologically, completed most-recent first)
+  const filteredTrainings = trainings
+    .filter((t) => {
+      if (filterStatus === 'all') return true;
+      return t.status === filterStatus;
+    })
+    .sort((a, b) => {
+      if (filterStatus === 'completato') {
+        return b.date.localeCompare(a.date);
+      }
+      return a.date.localeCompare(b.date);
+    });
 
   // Handle Athlete Toggle Registration
   const handleToggleRegistration = async (training: TrainingSession) => {

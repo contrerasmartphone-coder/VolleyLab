@@ -217,11 +217,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       locationName: newMatchData.locationName || 'PalaVolley',
       locationAddress: newMatchData.locationAddress || 'Via dello Sport',
       callUpStatus: 'bozza',
-      convocati: athletes.slice(0, 12).map((a, i) => ({
-        athleteId: a.id,
-        roleInMatch: i === 0 ? 'Capitano' : a.role === 'Libero' ? '1° Libero' : i < 7 ? 'Titolare' : 'Panchina',
-        confirmed: 'in_attesa',
-      })),
+      convocati: [],
     };
 
     await onSaveMatch(created);
@@ -230,7 +226,13 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       type: 'success',
     });
     setShowAddMatchModal(false);
+    setActiveTabModal('callups');
     setSelectedMatch(created);
+    setNewMatchData((prev) => ({
+      ...prev,
+      opponent: '',
+      convocati: [],
+    }));
   };
 
   return (
@@ -357,8 +359,12 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                       VS
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-white block">Volley Spike Club</span>
-                      <span className="text-[10px] text-slate-400">vs {match.opponent}</span>
+                      <span className="text-xs font-bold text-white block">
+                        {match.isHome ? `VOLLEY LAB PALERMO vs ${match.opponent}` : `${match.opponent} vs VOLLEY LAB PALERMO`}
+                      </span>
+                      <span className="text-[10px] text-slate-400">
+                        {match.isHome ? 'Gara Casalinga (In casa)' : 'Gara in Trasferta (Fuori casa)'}
+                      </span>
                     </div>
                   </div>
 
@@ -483,7 +489,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   {selectedMatch.round} • {selectedMatch.championship}
                 </span>
                 <h2 className="text-xl font-bold text-white font-display mt-1">
-                  Volley Spike Club vs {selectedMatch.opponent}
+                  {selectedMatch.isHome ? `VOLLEY LAB PALERMO vs ${selectedMatch.opponent}` : `${selectedMatch.opponent} vs VOLLEY LAB PALERMO`}
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5 font-mono">
                   {formatDate(selectedMatch.date)} alle ore {selectedMatch.time} • {selectedMatch.locationName} ({selectedMatch.locationAddress})
@@ -732,11 +738,17 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                     </div>
                   ) : canManage ? (
                     <form
+                      key={selectedMatch.id}
                       onSubmit={(e) => {
                         const target = e.target as any;
                         const setsHome = Number(target.setsHome.value);
                         const setsAway = Number(target.setsAway.value);
-                        const partials = target.partials.value.split(',').map((s: string) => s.trim());
+                        const partials = target.partials.value
+                          ? target.partials.value
+                              .split(',')
+                              .map((s: string) => s.trim())
+                              .filter(Boolean)
+                          : [];
                         const report = target.report.value;
                         handleSaveScore(e, {
                           setsHome,
@@ -754,25 +766,29 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-slate-400 mb-1">Set Volley Spike Club</label>
+                          <label className="block text-slate-400 mb-1">
+                            Set {selectedMatch.isHome ? 'VOLLEY LAB PALERMO (Casa)' : `${selectedMatch.opponent} (Casa)`}
+                          </label>
                           <input
                             name="setsHome"
                             type="number"
                             min="0"
                             max="3"
-                            defaultValue={3}
+                            placeholder="0"
                             required
                             className="w-full bg-[#11141d] border border-slate-700 rounded-lg px-3 py-2 text-white font-bold"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 mb-1">Set {selectedMatch.opponent}</label>
+                          <label className="block text-slate-400 mb-1">
+                            Set {selectedMatch.isHome ? `${selectedMatch.opponent} (Ospiti)` : 'VOLLEY LAB PALERMO (Ospiti)'}
+                          </label>
                           <input
                             name="setsAway"
                             type="number"
                             min="0"
                             max="3"
-                            defaultValue={1}
+                            placeholder="0"
                             required
                             className="w-full bg-[#11141d] border border-slate-700 rounded-lg px-3 py-2 text-white font-bold"
                           />
@@ -784,7 +800,6 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         <input
                           name="partials"
                           type="text"
-                          defaultValue="25-22, 23-25, 25-18, 25-20"
                           placeholder="es. 25-22, 23-25, 25-18, 25-20"
                           className="w-full bg-[#11141d] border border-slate-700 rounded-lg px-3 py-2 text-white"
                         />

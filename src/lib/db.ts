@@ -10,7 +10,7 @@ import {
 } from 'firebase/firestore';
 import { db } from './firebase';
 import { Athlete, TrainingSession, MatchEvent, User } from '../types';
-import { INITIAL_USERS, INITIAL_ATHLETES, INITIAL_TRAININGS, INITIAL_MATCHES } from './mockData';
+import { INITIAL_USERS } from './mockData';
 
 const COLLECTIONS = {
   USERS: 'users',

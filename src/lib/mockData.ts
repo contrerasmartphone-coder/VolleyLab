@@ -30,7 +30,7 @@ export const INITIAL_USERS: User[] = [
   },
 ];
 
-export const INITIAL_ATHLETES: Athlete[] = [
+export const INITIAL_ATHLETES: any[] = [
   {
     id: 'ath-1',
     firstName: 'Alessandro',
@@ -430,79 +430,5 @@ export const INITIAL_TRAININGS: TrainingSession[] = [
   },
 ];
 
-export const INITIAL_MATCHES: MatchEvent[] = [
-  {
-    id: 'match-1',
-    date: '2026-08-30', // Domenica
-    time: '18:00',
-    category: 'Serie C Maschile',
-    championship: 'Campionato Regionale FIPAV - Girone A',
-    round: '15ª Giornata',
-    opponent: 'ASD Volley Milano Stars',
-    isHome: true,
-    locationName: 'PalaVolley Arena',
-    locationAddress: 'Via dello Sport 12, Milano (MI)',
-    callUpStatus: 'pubblicata',
-    convocati: [
-      { athleteId: 'ath-1', roleInMatch: 'Capitano', confirmed: 'confermato', respondedAt: '2026-08-25T10:30:00Z' },
-      { athleteId: 'ath-2', roleInMatch: 'Titolare', confirmed: 'confermato', respondedAt: '2026-08-25T11:00:00Z' },
-      { athleteId: 'ath-4', roleInMatch: 'Titolare', confirmed: 'confermato', respondedAt: '2026-08-25T11:15:00Z' },
-      { athleteId: 'ath-5', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-6', roleInMatch: '1° Libero', confirmed: 'confermato', respondedAt: '2026-08-25T10:45:00Z' },
-      { athleteId: 'ath-7', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-8', roleInMatch: 'Panchina', confirmed: 'confermato', respondedAt: '2026-08-25T12:00:00Z' },
-    ],
-  },
-  {
-    id: 'match-2',
-    date: '2026-09-06',
-    time: '20:30',
-    category: 'Serie C Maschile',
-    championship: 'Campionato Regionale FIPAV - Girone A',
-    round: '16ª Giornata',
-    opponent: 'Polisportiva Orobica Volley',
-    isHome: false,
-    locationName: 'Palasport Comunale Bergamo',
-    locationAddress: 'Viale Europa 45, Bergamo (BG)',
-    callUpStatus: 'bozza',
-    convocati: [
-      { athleteId: 'ath-1', roleInMatch: 'Capitano', confirmed: 'in_attesa' },
-      { athleteId: 'ath-2', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-3', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-4', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-5', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-6', roleInMatch: '1° Libero', confirmed: 'in_attesa' },
-      { athleteId: 'ath-7', roleInMatch: 'Titolare', confirmed: 'in_attesa' },
-      { athleteId: 'ath-8', roleInMatch: 'Panchina', confirmed: 'in_attesa' },
-    ],
-  },
-  {
-    id: 'match-past-1',
-    date: '2026-08-23',
-    time: '18:00',
-    category: 'Serie C Maschile',
-    championship: 'Campionato Regionale FIPAV - Girone A',
-    round: '14ª Giornata',
-    opponent: 'Cus Brescia Pallavolo',
-    isHome: false,
-    locationName: 'Centro Sportivo San Filippo',
-    locationAddress: 'Via Bazoli 10, Brescia (BS)',
-    callUpStatus: 'conclusa',
-    convocati: [
-      { athleteId: 'ath-1', roleInMatch: 'Capitano', confirmed: 'confermato' },
-      { athleteId: 'ath-2', roleInMatch: 'Titolare', confirmed: 'confermato' },
-      { athleteId: 'ath-4', roleInMatch: 'Titolare', confirmed: 'confermato' },
-      { athleteId: 'ath-5', roleInMatch: 'Titolare', confirmed: 'confermato' },
-      { athleteId: 'ath-6', roleInMatch: '1° Libero', confirmed: 'confermato' },
-      { athleteId: 'ath-7', roleInMatch: 'Titolare', confirmed: 'confermato' },
-      { athleteId: 'ath-8', roleInMatch: 'Panchina', confirmed: 'confermato' },
-    ],
-    score: {
-      setsHome: 1,
-      setsAway: 3,
-      partialScores: ['25-23', '21-25', '18-25', '22-25'],
-      mvpAthleteId: 'ath-1',
-      matchReport: 'Vittoria fondamentale in trasferta per 3-1! Prestazione monumentale di Matteo Rossi (24 punti totali e 4 muri) e gestione magistrale del gioco di Piva.',
-    },
-  },
-];
+export const INITIAL_MATCHES: MatchEvent[] = [];
+
