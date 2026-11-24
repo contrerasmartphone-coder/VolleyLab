@@ -42,6 +42,49 @@ export function calculateDurationMinutes(startTime?: string, endTime?: string): 
   return endMinutes - startMinutes;
 }
 
+const ROLE_ORDER: Athlete['role'][] = [
+  'Palleggiatore',
+  'Opposto',
+  'Schiacciatore',
+  'Centrale',
+  'Libero',
+];
+
+function getRolePluralLabel(role: string, count: number): string {
+  switch (role) {
+    case 'Palleggiatore':
+      return count === 1 ? 'Palleggiatore' : 'Palleggiatori';
+    case 'Schiacciatore':
+      return count === 1 ? 'Schiacciatore' : 'Schiacciatori';
+    case 'Centrale':
+      return count === 1 ? 'Centrale' : 'Centrali';
+    case 'Opposto':
+      return count === 1 ? 'Opposto' : 'Opposti';
+    case 'Libero':
+      return count === 1 ? 'Libero' : 'Liberi';
+    default:
+      return role || 'Altro';
+  }
+}
+
+function getRegisteredRoleCounts(
+  registeredList: Athlete[]
+): Array<{ role: string; label: string; count: number }> {
+  const counts = new Map<string, number>();
+  for (const r of ROLE_ORDER) {
+    counts.set(r, 0);
+  }
+  for (const ath of registeredList) {
+    const r = ath.role || 'Altro';
+    counts.set(r, (counts.get(r) || 0) + 1);
+  }
+  return Array.from(counts.entries()).map(([role, count]) => ({
+    role,
+    label: getRolePluralLabel(role, count),
+    count,
+  }));
+}
+
 interface TrainingManagerProps {
   trainings: TrainingSession[];
   athletes: Athlete[];
@@ -654,6 +697,24 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                   )}
                 </div>
 
+                {/* Role Breakdown of Registered Athletes */}
+                {registeredAthletes.length > 0 && (
+                  <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                    {getRegisteredRoleCounts(registeredAthletes).map(({ role, label, count }) => (
+                      <span
+                        key={role}
+                        className={`px-2 py-0.5 rounded-lg text-[10px] font-bold border ${
+                          count > 0
+                            ? 'bg-cyan-500/10 text-cyan-300 border-cyan-500/25'
+                            : 'bg-[#0b0e14] text-slate-500 border-slate-800/80'
+                        }`}
+                      >
+                        {count} {label}
+                      </span>
+                    ))}
+                  </div>
+                )}
+
                 {isAthlete && isAbsent && absenceRecord?.reason && (
                   <p className="mt-2 text-[11px] text-rose-300/90 bg-rose-950/30 border border-rose-500/20 rounded-xl px-3 py-1.5">
                     <strong>Tua assenza comunicata:</strong> {absenceRecord.reason}
@@ -973,6 +1034,31 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                     )}
                   </div>
 
+                  {/* Role Summary for Registered Athletes */}
+                  {(() => {
+                    const regIds = new Set(selectedTraining.registeredAthleteIds || []);
+                    const regModalAthletes = athletes.filter((a) => regIds.has(a.id));
+                    return (
+                      <div className="p-3 bg-[#0b0e14] rounded-2xl border border-slate-800 flex flex-wrap items-center gap-2">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400 mr-1">
+                          Iscritti per ruolo ({regModalAthletes.length}):
+                        </span>
+                        {getRegisteredRoleCounts(regModalAthletes).map(({ role, label, count }) => (
+                          <span
+                            key={role}
+                            className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border ${
+                              count > 0
+                                ? 'bg-cyan-500/15 text-cyan-300 border-cyan-500/30'
+                                : 'bg-[#11141d] text-slate-500 border-slate-800'
+                            }`}
+                          >
+                            {count} {label}
+                          </span>
+                        ))}
+                      </div>
+                    );
+                  })()}
+
                   <div className="bg-[#0b0e14] rounded-2xl border border-slate-800 overflow-x-auto">
                     <table className="w-full min-w-[720px] text-left text-xs">
                       <thead className="bg-[#11141d] text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800 whitespace-nowrap">
@@ -1182,42 +1268,74 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               {/* TAB: REGISTERED ATHLETES & COMMUNICATED ABSENCES */}
               {activeTabModal === 'details' && (
                 <div className="space-y-6">
-                  <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Atleti Iscritti tramite Dashboard ({selectedTraining.registeredAthleteIds?.length || 0})
-                    </h4>
-                    {(selectedTraining.registeredAthleteIds?.length || 0) === 0 ? (
-                      <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
-                        Nessun atleta iscritto al momento.
-                      </div>
-                    ) : (
-                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                        {athletes
-                          .filter((a) => selectedTraining.registeredAthleteIds?.includes(a.id))
-                          .map((ath) => (
+                  {(() => {
+                    const regIds = new Set(selectedTraining.registeredAthleteIds || []);
+                    const regModalAthletes = athletes.filter((a) => regIds.has(a.id));
+                    const roleCounts = getRegisteredRoleCounts(regModalAthletes);
+                    return (
+                      <div className="space-y-3">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Atleti Iscritti tramite Dashboard ({regModalAthletes.length})
+                        </h4>
+                        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-5 gap-2">
+                          {roleCounts.map(({ role, label, count }) => (
                             <div
-                              key={ath.id}
-                              className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800 flex items-center gap-3"
+                              key={role}
+                              className={`p-2.5 rounded-xl border text-center ${
+                                count > 0
+                                  ? 'bg-cyan-500/10 border-cyan-500/30'
+                                  : 'bg-[#0b0e14] border-slate-800/80'
+                              }`}
                             >
-                              <span className="w-7 h-7 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-slate-800">
-                                #{ath.jerseyNumber}
+                              <span
+                                className={`text-lg font-black block leading-tight ${
+                                  count > 0 ? 'text-cyan-300' : 'text-slate-600'
+                                }`}
+                              >
+                                {count}
                               </span>
-                              <img
-                                src={ath.photoUrl}
-                                alt={ath.lastName}
-                                className="w-8 h-8 rounded-lg object-cover"
-                              />
-                              <div>
-                                <span className="font-bold text-white text-xs block truncate">
-                                  {ath.firstName} {ath.lastName}
-                                </span>
-                                <span className="text-[10px] text-slate-400">{ath.role}</span>
-                              </div>
+                              <span
+                                className={`text-[10px] font-bold uppercase tracking-wide ${
+                                  count > 0 ? 'text-slate-200' : 'text-slate-500'
+                                }`}
+                              >
+                                {label}
+                              </span>
                             </div>
                           ))}
+                        </div>
+                        {regModalAthletes.length === 0 ? (
+                          <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+                            Nessun atleta iscritto al momento.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            {regModalAthletes.map((ath) => (
+                              <div
+                                key={ath.id}
+                                className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800 flex items-center gap-3"
+                              >
+                                <span className="w-7 h-7 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-slate-800">
+                                  #{ath.jerseyNumber}
+                                </span>
+                                <img
+                                  src={ath.photoUrl}
+                                  alt={ath.lastName}
+                                  className="w-8 h-8 rounded-lg object-cover"
+                                />
+                                <div>
+                                  <span className="font-bold text-white text-xs block truncate">
+                                    {ath.firstName} {ath.lastName}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">{ath.role}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
-                    )}
-                  </div>
+                    );
+                  })()}
 
                   <div className="space-y-3 pt-4 border-t border-slate-800">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400">
