@@ -156,6 +156,36 @@ export interface MatchCallUp {
   respondedAt?: string;
 }
 
+export type ScoutSkill = 'battuta' | 'ricezione' | 'attacco' | 'muro';
+export type ScoutRating = '#' | '+' | '-' | '=';
+export type CourtZone = '1' | '2' | '3' | '4' | '5' | '6';
+
+export interface ScoutSubstitution {
+  id: string;
+  zone: CourtZone;
+  outAthleteId: string;
+  inAthleteId: string;
+  scoreAtSub?: string;
+  note?: string;
+  timestamp: string;
+}
+
+export interface ScoutEvent {
+  id: string;
+  athleteId: string;
+  skill: ScoutSkill;
+  rating: ScoutRating;
+  timestamp: string;
+}
+
+export interface MatchScoutSet {
+  setNumber: 1 | 2 | 3 | 4 | 5;
+  lineup: Partial<Record<CourtZone, string>>; // Posto 1..6 (sense antiorario, senza liberi)
+  liberoIds: string[];
+  substitutions: ScoutSubstitution[];
+  events: ScoutEvent[];
+}
+
 export interface MatchEvent {
   id: string;
   date: string; // YYYY-MM-DD
@@ -176,6 +206,9 @@ export interface MatchEvent {
     mvpAthleteId?: string;
     matchReport?: string;
   };
+  scoutSets?: MatchScoutSet[];
+  scoutPublishedToAthletes?: boolean;
+  scoutPublishedAt?: string;
 }
 
 export interface ClubInfo {

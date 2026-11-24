@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { MatchEvent, MatchCallUp, Athlete, User } from '../../types';
 import { formatDate } from '../../lib/db';
 import {
@@ -21,8 +21,10 @@ import {
   ChevronRight,
   Shield,
   FileText,
+  ClipboardCheck,
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
+import { MatchScoutPanel, PublishedMatchScoutStats } from './MatchScoutPanel';
 
 interface MatchCalendarProps {
   matches: MatchEvent[];
@@ -47,7 +49,12 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [selectedMatch, setSelectedMatch] = useState<MatchEvent | null>(null);
   const [showAddMatchModal, setShowAddMatchModal] = useState(false);
-  const [activeTabModal, setActiveTabModal] = useState<'callups' | 'score' | 'info'>('callups');
+  const [activeTabModal, setActiveTabModal] = useState<'callups' | 'score' | 'scout'>('callups');
+
+  const activeSelectedMatch = useMemo(() => {
+    if (!selectedMatch) return null;
+    return matches.find((m) => m.id === selectedMatch.id) ?? selectedMatch;
+  }, [matches, selectedMatch]);
 
   // Form states for new match
   const [newMatchData, setNewMatchData] = useState<Partial<MatchEvent>>({
@@ -451,19 +458,60 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 )}
               </div>
 
-              {/* Action Button */}
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
+              {/* Action Buttons */}
+              <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
                 <button
                   id={`open-match-details-${match.id}`}
                   onClick={() => {
                     setSelectedMatch(match);
                     setActiveTabModal('callups');
                   }}
-                  className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-[#0b0e14] hover:bg-[#161b26] text-slate-200 border border-slate-700 transition-colors"
+                  className="flex-1 flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-[#0b0e14] hover:bg-[#161b26] text-slate-200 border border-slate-700 transition-colors cursor-pointer"
                 >
                   <Users className="w-4 h-4 text-amber-400" />
-                  {canManage ? 'Gestisci Foglio Convocazioni & Risultato' : 'Visualizza Convocazioni & Info Gara'}
+                  {canManage ? 'Convocazioni & Risultato' : 'Convocazioni & Info Gara'}
                 </button>
+                {canManage && (
+                  <button
+                    id={`open-match-scout-${match.id}`}
+                    onClick={() => {
+                      setSelectedMatch(match);
+                      setActiveTabModal('scout');
+                    }}
+                    className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-amber-500/15 hover:bg-amber-500/25 text-amber-300 border border-amber-500/30 transition-colors cursor-pointer shrink-0"
+                    title="Apri Scout Semplificato (Staff)"
+                  >
+                    <ClipboardCheck className="w-4 h-4" />
+                    Scout
+                    {(() => {
+                      const tot = (match.scoutSets || []).reduce(
+                        (acc, s) => acc + (s.events?.length || 0),
+                        0
+                      );
+                      return tot > 0 ? (
+                        <span className="px-1.5 py-0.2 rounded bg-amber-500 text-slate-950 text-[10px] font-black">
+                          {tot}
+                        </span>
+                      ) : null;
+                    })()}
+                  </button>
+                )}
+                {!canManage &&
+                  match.scoutPublishedToAthletes &&
+                  (match.scoutSets || []).some((s) => (s.events?.length || 0) > 0) && (
+                    <button
+                      id={`open-match-published-scout-${match.id}`}
+                      onClick={() => {
+                        setSelectedMatch(match);
+                        setActiveTabModal('score');
+                      }}
+                      className="flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-500/30 transition-colors cursor-pointer shrink-0"
+                      title="Visualizza Dati Scout Pubblicati"
+                    >
+                      <ClipboardCheck className="w-4 h-4" />
+                      Dati Scout
+                    </button>
+                  )}
               </div>
             </div>
           );
@@ -472,7 +520,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       )}
 
       {/* Match Details & Convocations Modal */}
-      {selectedMatch && (
+      {activeSelectedMatch && (
         <div
           className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
           onClick={() => setSelectedMatch(null)}
@@ -486,13 +534,13 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
             <div className="p-6 border-b border-slate-800 bg-[#0b0e14] flex items-start justify-between gap-4">
               <div>
                 <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded-md bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {selectedMatch.round} • {selectedMatch.championship}
+                  {activeSelectedMatch.round} • {activeSelectedMatch.championship}
                 </span>
                 <h2 className="text-xl font-bold text-white font-display mt-1">
-                  {selectedMatch.isHome ? `VOLLEY LAB PALERMO vs ${selectedMatch.opponent}` : `${selectedMatch.opponent} vs VOLLEY LAB PALERMO`}
+                  {activeSelectedMatch.isHome ? `VOLLEY LAB PALERMO vs ${activeSelectedMatch.opponent}` : `${activeSelectedMatch.opponent} vs VOLLEY LAB PALERMO`}
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5 font-mono">
-                  {formatDate(selectedMatch.date)} alle ore {selectedMatch.time} • {selectedMatch.locationName} ({selectedMatch.locationAddress})
+                  {formatDate(activeSelectedMatch.date)} alle ore {activeSelectedMatch.time} • {activeSelectedMatch.locationName} ({activeSelectedMatch.locationAddress})
                 </p>
               </div>
 
@@ -502,15 +550,15 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                     onClick={async () => {
                       const confirmed = await confirm({
                         title: 'Elimina Partita dal Calendario',
-                        message: `Sei sicuro di voler eliminare definitivamente la gara contro "${selectedMatch.opponent}" del ${formatDate(selectedMatch.date)}? L'operazione cancellerà anche tutte le convocazioni correlate.`,
+                        message: `Sei sicuro di voler eliminare definitivamente la gara contro "${activeSelectedMatch.opponent}" del ${formatDate(activeSelectedMatch.date)}? L'operazione cancellerà anche tutte le convocazioni correlate.`,
                         confirmText: 'Sì, Elimina Partita',
                         cancelText: 'Annulla',
                         type: 'danger',
                       });
                       if (confirmed) {
-                        await onDeleteMatch(selectedMatch.id);
+                        await onDeleteMatch(activeSelectedMatch.id);
                         showToast({
-                          message: `Partita contro ${selectedMatch.opponent} eliminata dal calendario`,
+                          message: `Partita contro ${activeSelectedMatch.opponent} eliminata dal calendario`,
                           type: 'info',
                         });
                         setSelectedMatch(null);
@@ -532,31 +580,57 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
             </div>
 
             {/* Modal Tabs */}
-            <div className="flex items-center gap-2 px-6 py-2 border-b border-slate-800 bg-[#0b0e14]/60">
+            <div className="flex items-center gap-2 px-4 sm:px-6 py-2 border-b border-slate-800 bg-[#0b0e14]/60 overflow-x-auto">
               <button
                 onClick={() => setActiveTabModal('callups')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
                   activeTabModal === 'callups'
                     ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Convocazioni Ufficiali ({selectedMatch.convocati?.length || 0})
+                Convocazioni Ufficiali ({activeSelectedMatch.convocati?.length || 0})
               </button>
+              {canManage && (
+                <button
+                  onClick={() => setActiveTabModal('scout')}
+                  className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
+                    activeTabModal === 'scout'
+                      ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  <ClipboardCheck className="w-3.5 h-3.5" />
+                  Scout Semplificato
+                  {(() => {
+                    const tot = (activeSelectedMatch.scoutSets || []).reduce(
+                      (acc, s) => acc + (s.events?.length || 0),
+                      0
+                    );
+                    return tot > 0 ? ` (${tot})` : '';
+                  })()}
+                </button>
+              )}
               <button
                 onClick={() => setActiveTabModal('score')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer flex items-center gap-1.5 ${
                   activeTabModal === 'score'
                     ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Risultato & Tabellino
+                <span>Risultato & Tabellino</span>
+                {activeSelectedMatch.scoutPublishedToAthletes &&
+                  (activeSelectedMatch.scoutSets || []).some((s) => (s.events?.length || 0) > 0) && (
+                    <span className="px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-black uppercase">
+                      Scout
+                    </span>
+                  )}
               </button>
             </div>
 
             {/* Modal Content */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
               {/* TAB: CALL-UPS */}
               {activeTabModal === 'callups' && (
                 <div className="space-y-4">
@@ -567,7 +641,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
 
                     {canManage && (
                       <div className="flex items-center gap-2">
-                        {selectedMatch.callUpStatus === 'bozza' ? (
+                        {activeSelectedMatch.callUpStatus === 'bozza' ? (
                           <button
                             onClick={handlePublishCallUps}
                             className="px-3 py-1.5 bg-amber-500 hover:bg-amber-400 text-slate-950 rounded-xl text-xs font-bold shadow-md shadow-amber-500/20 transition-all"
@@ -584,8 +658,8 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   </div>
 
                   {/* Athletes selection list */}
-                  <div className="bg-[#0b0e14] rounded-2xl border border-slate-800 overflow-hidden">
-                    <table className="w-full text-left text-xs">
+                  <div className="bg-[#0b0e14] rounded-2xl border border-slate-800 overflow-x-auto">
+                    <table className="w-full min-w-[640px] text-left text-xs">
                       <thead className="bg-[#11141d] text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
                         <tr>
                           <th className="p-3">Giocatore</th>
@@ -597,7 +671,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                       </thead>
                       <tbody className="divide-y divide-slate-800/60">
                         {athletes.map((athlete) => {
-                          const callUp = selectedMatch.convocati?.find((c) => c.athleteId === athlete.id);
+                          const callUp = activeSelectedMatch.convocati?.find((c) => c.athleteId === athlete.id);
                           const isCalledUp = Boolean(callUp);
 
                           return (
@@ -705,21 +779,21 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
               {/* TAB: SCORE & MATCH REPORT */}
               {activeTabModal === 'score' && (
                 <div className="space-y-6">
-                  {selectedMatch.score ? (
+                  {activeSelectedMatch.score ? (
                     <div className="p-5 bg-[#0b0e14] rounded-2xl border border-slate-800 space-y-4">
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-bold uppercase tracking-wider text-slate-400">
                           Risultato Finale
                         </span>
                         <span className="text-2xl font-black text-emerald-400">
-                          {selectedMatch.score.setsHome} - {selectedMatch.score.setsAway}
+                          {activeSelectedMatch.score.setsHome} - {activeSelectedMatch.score.setsAway}
                         </span>
                       </div>
 
                       <div>
                         <span className="text-xs text-slate-400 block font-medium mb-1">Parziali Set:</span>
                         <div className="flex gap-2">
-                          {selectedMatch.score.partialScores?.map((p, i) => (
+                          {activeSelectedMatch.score.partialScores?.map((p, i) => (
                             <span key={i} className="px-3 py-1 bg-[#11141d] rounded-lg text-xs font-bold text-white border border-slate-800">
                               Set {i + 1}: {p}
                             </span>
@@ -727,18 +801,18 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         </div>
                       </div>
 
-                      {selectedMatch.score.matchReport && (
+                      {activeSelectedMatch.score.matchReport && (
                         <div className="p-3 bg-[#11141d] rounded-xl border border-slate-800">
                           <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">
                             Cronaca & Commento Tecnico
                           </span>
-                          <p className="text-xs text-slate-300">{selectedMatch.score.matchReport}</p>
+                          <p className="text-xs text-slate-300">{activeSelectedMatch.score.matchReport}</p>
                         </div>
                       )}
                     </div>
                   ) : canManage ? (
                     <form
-                      key={selectedMatch.id}
+                      key={activeSelectedMatch.id}
                       onSubmit={(e) => {
                         const target = e.target as any;
                         const setsHome = Number(target.setsHome.value);
@@ -767,7 +841,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                       <div className="grid grid-cols-2 gap-4">
                         <div>
                           <label className="block text-slate-400 mb-1">
-                            Set {selectedMatch.isHome ? 'VOLLEY LAB PALERMO (Casa)' : `${selectedMatch.opponent} (Casa)`}
+                            Set {activeSelectedMatch.isHome ? 'VOLLEY LAB PALERMO (Casa)' : `${activeSelectedMatch.opponent} (Casa)`}
                           </label>
                           <input
                             name="setsHome"
@@ -781,7 +855,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         </div>
                         <div>
                           <label className="block text-slate-400 mb-1">
-                            Set {selectedMatch.isHome ? `${selectedMatch.opponent} (Ospiti)` : 'VOLLEY LAB PALERMO (Ospiti)'}
+                            Set {activeSelectedMatch.isHome ? `${activeSelectedMatch.opponent} (Ospiti)` : 'VOLLEY LAB PALERMO (Ospiti)'}
                           </label>
                           <input
                             name="setsAway"
@@ -824,14 +898,37 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         </button>
                       </div>
                     </form>
-                  ) : (
+                  ) : !activeSelectedMatch.scoutPublishedToAthletes ? (
                     <div className="p-8 text-center bg-[#0b0e14] rounded-2xl border border-slate-800">
                       <Trophy className="w-8 h-8 text-slate-600 mx-auto mb-2" />
                       <p className="text-sm font-semibold text-slate-300">Partita non ancora disputata</p>
                       <p className="text-xs text-slate-500 mt-0.5">Il tabellino sarà inserito dallo staff dopo la fine del match.</p>
                     </div>
+                  ) : null}
+
+                  {/* Published Scout Total Data (visible to athletes & staff once published) */}
+                  {activeSelectedMatch.scoutPublishedToAthletes && (
+                    <PublishedMatchScoutStats
+                      match={activeSelectedMatch}
+                      athletes={athletes}
+                      highlightAthleteId={currentAthleteId || undefined}
+                    />
                   )}
                 </div>
+              )}
+
+              {/* TAB: SIMPLIFIED MATCH SCOUT (STAFF ONLY) */}
+              {canManage && activeTabModal === 'scout' && (
+                <MatchScoutPanel
+                  key={activeSelectedMatch.id}
+                  match={activeSelectedMatch}
+                  athletes={athletes}
+                  canManage={canManage}
+                  onSaveMatch={async (updatedMatch) => {
+                    setSelectedMatch(updatedMatch);
+                    await onSaveMatch(updatedMatch);
+                  }}
+                />
               )}
             </div>
           </div>

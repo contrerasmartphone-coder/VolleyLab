@@ -379,6 +379,7 @@ function MainAppContent() {
             {activeTab === 'my_portal' && (
               <AthletePortal
                 athlete={currentAthleteRecord}
+                athletes={athletes}
                 trainings={trainings}
                 matches={matches}
                 onToggleTrainingReg={async (t) => {
