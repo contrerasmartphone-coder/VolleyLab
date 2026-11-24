@@ -42,8 +42,6 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
   isCoach,
 }) => {
   const { confirm, prompt, showToast } = useDialog();
-  const isStaff = currentUser?.role === 'staff';
-  const canManage = isCoach || isStaff;
   const [filterType, setFilterType] = useState<'all' | 'upcoming' | 'past'>('all');
   const [selectedMatch, setSelectedMatch] = useState<MatchEvent | null>(null);
   const [showAddMatchModal, setShowAddMatchModal] = useState(false);
@@ -68,8 +66,6 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
 
   // Filter matches
   const nowStr = new Date().toISOString().split('T')[0];
-  const upcomingCount = matches.filter((m) => m.date >= nowStr).length;
-  const pastCount = matches.filter((m) => m.date < nowStr || m.callUpStatus === 'conclusa').length;
   const filteredMatches = matches.filter((m) => {
     if (filterType === 'upcoming') return m.date >= nowStr;
     if (filterType === 'past') return m.date < nowStr || m.callUpStatus === 'conclusa';
@@ -217,7 +213,11 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       locationName: newMatchData.locationName || 'PalaVolley',
       locationAddress: newMatchData.locationAddress || 'Via dello Sport',
       callUpStatus: 'bozza',
-      convocati: [],
+      convocati: athletes.slice(0, 12).map((a, i) => ({
+        athleteId: a.id,
+        roleInMatch: i === 0 ? 'Capitano' : a.role === 'Libero' ? '1° Libero' : i < 7 ? 'Titolare' : 'Panchina',
+        confirmed: 'in_attesa',
+      })),
     };
 
     await onSaveMatch(created);
@@ -226,13 +226,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       type: 'success',
     });
     setShowAddMatchModal(false);
-    setActiveTabModal('callups');
     setSelectedMatch(created);
-    setNewMatchData((prev) => ({
-      ...prev,
-      opponent: '',
-      convocati: [],
-    }));
   };
 
   return (
@@ -243,22 +237,27 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-2xl font-black text-white font-display tracking-tight">
-                Calendario Partite
+                Calendario Partite & Convocazioni Ufficiali
               </h1>
               <span className="px-2.5 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-full">
-                {matches.length === 1 ? '1 Gara in Calendario' : `${matches.length} Gare in Calendario`}
+                {matches.length} Gare in Calendario
               </span>
             </div>
+            <p className="text-xs text-slate-400">
+              {isCoach
+                ? 'Gestisci le convocazioni per le partite di campionato, assegna ruoli di formazione e pubblica i tabellini'
+                : 'Consulta le convocazioni ufficiali alle partite, conferma la tua disponibilità e visualizza i dettagli logistici'}
+            </p>
           </div>
 
-          {canManage && (
+          {isCoach && (
             <button
               id="add-match-button"
               onClick={() => setShowAddMatchModal(true)}
               className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all hover:scale-102"
             >
               <Plus className="w-4 h-4" />
-              Nuova Partita
+              Aggiungi Partita
             </button>
           )}
         </div>
@@ -283,7 +282,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 : 'bg-[#0b0e14] text-slate-400 hover:text-white border border-slate-800'
             }`}
           >
-            In Programma ({upcomingCount})
+            Prossime Partite
           </button>
           <button
             onClick={() => setFilterType('past')}
@@ -293,7 +292,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 : 'bg-[#0b0e14] text-slate-400 hover:text-white border border-slate-800'
             }`}
           >
-            Concluse ({pastCount})
+            Risultati & Concluse
           </button>
         </div>
       </div>
@@ -302,7 +301,10 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       {filteredMatches.length === 0 ? (
         <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-12 text-center shadow-xl">
           <Calendar className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-white">Nessuna partita trovata</h3>
+          <h3 className="text-base font-bold text-white">Nessuna partita a calendario</h3>
+          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
+            Non ci sono incontri corrispondenti al filtro selezionato o tutti i match sono stati rimossi.
+          </p>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -359,12 +361,8 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                       VS
                     </div>
                     <div>
-                      <span className="text-xs font-bold text-white block">
-                        {match.isHome ? `VOLLEY LAB PALERMO vs ${match.opponent}` : `${match.opponent} vs VOLLEY LAB PALERMO`}
-                      </span>
-                      <span className="text-[10px] text-slate-400">
-                        {match.isHome ? 'Gara Casalinga (In casa)' : 'Gara in Trasferta (Fuori casa)'}
-                      </span>
+                      <span className="text-xs font-bold text-white block">Volley Spike Club</span>
+                      <span className="text-[10px] text-slate-400">vs {match.opponent}</span>
                     </div>
                   </div>
 
@@ -395,7 +393,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                 </div>
 
                 {/* Athlete Call-up Status Banner */}
-                {!canManage && myCallUp && (
+                {!isCoach && myCallUp && (
                   <div className="mt-3 p-3 rounded-xl border bg-[#0b0e14] border-slate-800 space-y-2">
                     <div className="flex items-center justify-between text-xs">
                       <span className="text-slate-300 font-medium">
@@ -462,7 +460,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   className="w-full flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold bg-[#0b0e14] hover:bg-[#161b26] text-slate-200 border border-slate-700 transition-colors"
                 >
                   <Users className="w-4 h-4 text-amber-400" />
-                  {canManage ? 'Gestisci Foglio Convocazioni & Risultato' : 'Visualizza Convocazioni & Info Gara'}
+                  {isCoach ? 'Gestisci Foglio Convocazioni & Risultato' : 'Visualizza Convocazioni & Info Gara'}
                 </button>
               </div>
             </div>
@@ -489,7 +487,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   {selectedMatch.round} • {selectedMatch.championship}
                 </span>
                 <h2 className="text-xl font-bold text-white font-display mt-1">
-                  {selectedMatch.isHome ? `VOLLEY LAB PALERMO vs ${selectedMatch.opponent}` : `${selectedMatch.opponent} vs VOLLEY LAB PALERMO`}
+                  Volley Spike Club vs {selectedMatch.opponent}
                 </h2>
                 <p className="text-xs text-slate-400 mt-0.5 font-mono">
                   {formatDate(selectedMatch.date)} alle ore {selectedMatch.time} • {selectedMatch.locationName} ({selectedMatch.locationAddress})
@@ -497,7 +495,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                {canManage && onDeleteMatch && (
+                {isCoach && onDeleteMatch && (
                   <button
                     onClick={async () => {
                       const confirmed = await confirm({
@@ -563,9 +561,14 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
                     <div>
                       <h3 className="text-sm font-bold text-white">Foglio Gara & Convocazioni</h3>
+                      <p className="text-xs text-slate-400">
+                        {isCoach
+                          ? 'Seleziona i giocatori da convocare e assegna i ruoli di formazione (Titolare, Panchina, Capitano, Libero)'
+                          : 'Elenco degli atleti convocati per la gara con stato di disponibilità'}
+                      </p>
                     </div>
 
-                    {canManage && (
+                    {isCoach && (
                       <div className="flex items-center gap-2">
                         {selectedMatch.callUpStatus === 'bozza' ? (
                           <button
@@ -623,7 +626,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                               <td className="p-3 text-slate-300">{athlete.role}</td>
 
                               <td className="p-3">
-                                {canManage ? (
+                                {isCoach ? (
                                   <button
                                     onClick={() => handleToggleAthleteCallUp(athlete.id)}
                                     className={`px-2.5 py-1 text-xs font-bold rounded-lg transition-colors ${
@@ -646,7 +649,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                               </td>
 
                               <td className="p-3">
-                                {canManage && isCalledUp ? (
+                                {isCoach && isCalledUp ? (
                                   <select
                                     value={callUp?.roleInMatch || 'Titolare'}
                                     onChange={(e) => handleChangeRoleInMatch(athlete.id, e.target.value as any)}
@@ -736,19 +739,13 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         </div>
                       )}
                     </div>
-                  ) : canManage ? (
+                  ) : isCoach ? (
                     <form
-                      key={selectedMatch.id}
                       onSubmit={(e) => {
                         const target = e.target as any;
                         const setsHome = Number(target.setsHome.value);
                         const setsAway = Number(target.setsAway.value);
-                        const partials = target.partials.value
-                          ? target.partials.value
-                              .split(',')
-                              .map((s: string) => s.trim())
-                              .filter(Boolean)
-                          : [];
+                        const partials = target.partials.value.split(',').map((s: string) => s.trim());
                         const report = target.report.value;
                         handleSaveScore(e, {
                           setsHome,
@@ -766,29 +763,25 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
 
                       <div className="grid grid-cols-2 gap-4">
                         <div>
-                          <label className="block text-slate-400 mb-1">
-                            Set {selectedMatch.isHome ? 'VOLLEY LAB PALERMO (Casa)' : `${selectedMatch.opponent} (Casa)`}
-                          </label>
+                          <label className="block text-slate-400 mb-1">Set Volley Spike Club</label>
                           <input
                             name="setsHome"
                             type="number"
                             min="0"
                             max="3"
-                            placeholder="0"
+                            defaultValue={3}
                             required
                             className="w-full bg-[#11141d] border border-slate-700 rounded-lg px-3 py-2 text-white font-bold"
                           />
                         </div>
                         <div>
-                          <label className="block text-slate-400 mb-1">
-                            Set {selectedMatch.isHome ? `${selectedMatch.opponent} (Ospiti)` : 'VOLLEY LAB PALERMO (Ospiti)'}
-                          </label>
+                          <label className="block text-slate-400 mb-1">Set {selectedMatch.opponent}</label>
                           <input
                             name="setsAway"
                             type="number"
                             min="0"
                             max="3"
-                            placeholder="0"
+                            defaultValue={1}
                             required
                             className="w-full bg-[#11141d] border border-slate-700 rounded-lg px-3 py-2 text-white font-bold"
                           />
@@ -800,6 +793,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         <input
                           name="partials"
                           type="text"
+                          defaultValue="25-22, 23-25, 25-18, 25-20"
                           placeholder="es. 25-22, 23-25, 25-18, 25-20"
                           className="w-full bg-[#11141d] border border-slate-700 rounded-lg px-3 py-2 text-white"
                         />

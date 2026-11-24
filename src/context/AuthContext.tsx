@@ -10,7 +10,6 @@ interface AuthContextType {
   isCoach: boolean;
   isStaff: boolean;
   isAthlete: boolean;
-  canManageAll: boolean;
   canManageUsers: boolean;
   canManageAthletes: boolean;
   canEditHealthAndProgress: boolean;
@@ -229,14 +228,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isStaff = currentUser?.role === 'staff';
   const isAthlete = currentUser?.role === 'athlete';
 
-  // Privileges matrix: Staff e Coach hanno gli stessi identici privilegi e visualizzazioni
-  const canManageAll = isCoach || isStaff;
-  const canManageUsers = isCoach || isStaff;
-  const canManageAthletes = isCoach || isStaff;
+  // Privileges matrix
+  const canManageUsers = isCoach;
+  const canManageAthletes = isCoach;
   const canEditHealthAndProgress = isCoach || isStaff;
-  const canManageTrainings = isCoach || isStaff;
+  const canManageTrainings = isCoach;
   const canTakeAttendance = isCoach || isStaff;
-  const canManageMatches = isCoach || isStaff;
+  const canManageMatches = isCoach;
 
   return (
     <AuthContext.Provider
@@ -247,7 +245,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         isCoach,
         isStaff,
         isAthlete,
-        canManageAll,
         canManageUsers,
         canManageAthletes,
         canEditHealthAndProgress,

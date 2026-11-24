@@ -1,14 +1,12 @@
 import React, { useState, useEffect } from 'react';
 import { AuthProvider, useAuth } from './context/AuthContext';
 import { DialogProvider } from './context/DialogContext';
-import { ThemeProvider } from './context/ThemeContext';
 import { Header } from './components/common/Header';
 import { AthleteList } from './components/athletes/AthleteList';
 import { TrainingManager } from './components/trainings/TrainingManager';
 import { ProgressDashboard } from './components/progress/ProgressDashboard';
 import { MatchCalendar } from './components/matches/MatchCalendar';
 import { UserManager } from './components/users/UserManager';
-import { SettingsManager } from './components/settings/SettingsManager';
 import { AthletePortal } from './components/dashboard/AthletePortal';
 import { AthleteDetailModal } from './components/athletes/AthleteDetailModal';
 import { LoginModal } from './components/auth/LoginModal';
@@ -31,11 +29,10 @@ import { Athlete, TrainingSession, MatchEvent, User } from './types';
 import { Shield, Sparkles, Activity, Trophy, Calendar, Users, HeartPulse, Zap } from 'lucide-react';
 
 function MainAppContent() {
-  const { currentUser, isCoach, isStaff, isAthlete, updateUser, canManageAll } = useAuth();
-  const canManage = isCoach || isStaff || Boolean(canManageAll);
+  const { currentUser, isCoach, isStaff, isAthlete, updateUser } = useAuth();
 
   // Active Tab state
-  const [activeTab, setActiveTab] = useState<'athletes' | 'trainings' | 'matches' | 'users' | 'settings' | 'my_portal'>('athletes');
+  const [activeTab, setActiveTab] = useState<'athletes' | 'trainings' | 'matches' | 'users' | 'my_portal'>('athletes');
 
   // Real-time Database State
   const [athletes, setAthletes] = useState<Athlete[]>([]);
@@ -50,18 +47,20 @@ function MainAppContent() {
   // Selected athlete for modal view anywhere in app
   const [selectedAthleteModal, setSelectedAthleteModal] = useState<Athlete | null>(null);
 
-  // Set default tab on role switch & guard restricted tabs
+  // Set default tab on role switch
   useEffect(() => {
     if (currentUser?.role === 'athlete') {
-      if (activeTab === 'athletes' || activeTab === 'users' || activeTab === 'settings') {
-        setActiveTab('my_portal');
+      setActiveTab('my_portal');
+    } else if (currentUser?.role === 'staff') {
+      if (activeTab === 'my_portal' || activeTab === 'users') {
+        setActiveTab('athletes');
       }
-    } else if (currentUser?.role === 'staff' || currentUser?.role === 'coach') {
+    } else if (currentUser?.role === 'coach') {
       if (activeTab === 'my_portal') {
         setActiveTab('athletes');
       }
     }
-  }, [currentUser?.role, activeTab]);
+  }, [currentUser?.role]);
 
   // Real-time Firestore Subscriptions & Initial Seed
   useEffect(() => {
@@ -262,33 +261,15 @@ function MainAppContent() {
           </div>
         ) : (
           <>
-            {/* VIEW 1: ATHLETE LIST & DOSSIER (COACH & STAFF) */}
-            {activeTab === 'athletes' && canManage && (
+            {/* VIEW 1: ATHLETE LIST & DOSSIER */}
+            {activeTab === 'athletes' && (
               <AthleteList
                 athletes={athletes}
                 trainings={trainings}
                 onSaveAthlete={handleSaveAthlete}
-                onDeleteAthlete={canManage ? handleDeleteAthlete : undefined}
-                isCoach={canManage}
+                onDeleteAthlete={isCoach ? handleDeleteAthlete : undefined}
+                isCoach={isCoach}
               />
-            )}
-
-            {activeTab === 'athletes' && !canManage && (
-              <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-10 text-center max-w-md mx-auto space-y-3 shadow-xl">
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
-                  <Shield className="w-6 h-6" />
-                </div>
-                <h3 className="text-base font-bold text-white font-display">Accesso Riservato ad Allenatore e Staff Tecnico</h3>
-                <p className="text-xs text-slate-400">
-                  La sezione Atleti è momentaneamente riservata allo staff tecnico.
-                </p>
-                <button
-                  onClick={() => setActiveTab('my_portal')}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer"
-                >
-                  Torna al Portale Atleta
-                </button>
-              </div>
             )}
 
             {/* VIEW 2: TRAININGS & ATTENDANCE */}
@@ -298,8 +279,8 @@ function MainAppContent() {
                 athletes={athletes}
                 currentUser={currentUser}
                 onSaveTraining={handleSaveTraining}
-                onDeleteTraining={canManage ? handleDeleteTraining : undefined}
-                isCoach={canManage}
+                onDeleteTraining={isCoach ? handleDeleteTraining : undefined}
+                isCoach={isCoach}
               />
             )}
 
@@ -311,13 +292,13 @@ function MainAppContent() {
                 athletes={athletes}
                 currentUser={currentUser}
                 onSaveMatch={handleSaveMatch}
-                onDeleteMatch={canManage ? handleDeleteMatch : undefined}
-                isCoach={canManage}
+                onDeleteMatch={isCoach ? handleDeleteMatch : undefined}
+                isCoach={isCoach}
               />
             )}
 
-            {/* VIEW 5: USER CREDENTIALS TABLE (COACH & STAFF) */}
-            {activeTab === 'users' && canManage && (
+            {/* VIEW 5: USER CREDENTIALS TABLE (COACH ONLY) */}
+            {activeTab === 'users' && isCoach && (
               <UserManager
                 users={dbUsers}
                 athletes={athletes}
@@ -328,14 +309,14 @@ function MainAppContent() {
               />
             )}
 
-            {activeTab === 'users' && !canManage && (
+            {activeTab === 'users' && !isCoach && (
               <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-10 text-center max-w-md mx-auto space-y-3 shadow-xl">
                 <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
                   <Shield className="w-6 h-6" />
                 </div>
-                <h3 className="text-base font-bold text-white font-display">Accesso Riservato ad Allenatore e Staff Tecnico</h3>
+                <h3 className="text-base font-bold text-white font-display">Accesso Riservato al Coach Roberto Florulli</h3>
                 <p className="text-xs text-slate-400">
-                  La gestione credenziali e configurazione account è riservata all'allenatore e allo staff tecnico.
+                  La gestione credenziali e configurazione account è riservata esclusivamente al Coach Roberto Florulli.
                 </p>
                 <button
                   onClick={() => setActiveTab(isAthlete ? 'my_portal' : 'athletes')}
@@ -346,36 +327,7 @@ function MainAppContent() {
               </div>
             )}
 
-            {/* VIEW 6: SETTINGS & BACKUP/RESTORE (COACH & STAFF) */}
-            {activeTab === 'settings' && canManage && (
-              <SettingsManager
-                athletes={athletes}
-                trainings={trainings}
-                matches={matches}
-                users={dbUsers}
-                currentUser={currentUser}
-              />
-            )}
-
-            {activeTab === 'settings' && !canManage && (
-              <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-10 text-center max-w-md mx-auto space-y-3 shadow-xl">
-                <div className="w-12 h-12 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center mx-auto text-amber-400">
-                  <Shield className="w-6 h-6" />
-                </div>
-                <h3 className="text-base font-bold text-white font-display">Accesso Riservato ad Allenatore e Staff Tecnico</h3>
-                <p className="text-xs text-slate-400">
-                  La gestione backup e sicurezza del database è riservata all'allenatore e allo staff tecnico.
-                </p>
-                <button
-                  onClick={() => setActiveTab(isAthlete ? 'my_portal' : 'athletes')}
-                  className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs rounded-xl shadow-md transition-colors cursor-pointer"
-                >
-                  Torna alla Dashboard
-                </button>
-              </div>
-            )}
-
-            {/* VIEW 7: DEDICATED ATHLETE PORTAL */}
+            {/* VIEW 6: DEDICATED ATHLETE PORTAL */}
             {activeTab === 'my_portal' && (
               <AthletePortal
                 athlete={currentAthleteRecord}
@@ -424,8 +376,8 @@ function MainAppContent() {
           isOpen={Boolean(selectedAthleteModal)}
           onClose={() => setSelectedAthleteModal(null)}
           onSave={handleSaveAthlete}
-          onDelete={canManage ? handleDeleteAthlete : undefined}
-          isCoach={canManage}
+          onDelete={handleDeleteAthlete}
+          isCoach={isCoach}
         />
       )}
 
@@ -445,12 +397,10 @@ function MainAppContent() {
 
 export default function App() {
   return (
-    <ThemeProvider>
-      <AuthProvider>
-        <DialogProvider>
-          <MainAppContent />
-        </DialogProvider>
-      </AuthProvider>
-    </ThemeProvider>
+    <AuthProvider>
+      <DialogProvider>
+        <MainAppContent />
+      </DialogProvider>
+    </AuthProvider>
   );
 }

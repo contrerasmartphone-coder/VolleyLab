@@ -65,11 +65,10 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
     );
   }
 
-  // Upcoming trainings (next 4 in chronological order)
+  // Upcoming trainings (next 5)
   const nowStr = new Date().toISOString().split('T')[0];
   const upcomingTrainings = trainings
-    .filter((t) => t.date >= nowStr && t.status === 'programmato')
-    .sort((a, b) => a.date.localeCompare(b.date))
+    .filter((t) => t.date >= nowStr || t.status === 'programmato')
     .slice(0, 4);
 
   // Upcoming matches with call-up for this athlete
@@ -133,20 +132,14 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                {athlete.medicalCertExpiry ? (
-                  <>
-                    Visita medica valida fino al{' '}
-                    <strong className="text-emerald-400">{athlete.medicalCertExpiry}</strong>
-                  </>
-                ) : (
-                  <span className="text-slate-500">Scadenza visita medica non specificata</span>
-                )}
+                {athlete.category} • Visita medica valida fino al{' '}
+                <strong className="text-emerald-400">{athlete.medicalCertExpiry}</strong>
               </p>
 
               <div className="flex items-center gap-4 mt-3 text-xs text-slate-300">
-                <span>Altezza: <strong className="text-white">{athlete.heightCm ? `${athlete.heightCm} cm` : 'N/D'}</strong></span>
-                <span>Peso: <strong className="text-white">{athlete.weightKg ? `${athlete.weightKg} kg` : 'N/D'}</strong></span>
-                <span>Salto Attacco: <strong className="text-orange-400">{athlete.spikeReachCm ? `${athlete.spikeReachCm} cm` : 'N/D'}</strong></span>
+                <span>Altezza: <strong className="text-white">{athlete.heightCm} cm</strong></span>
+                <span>Peso: <strong className="text-white">{athlete.weightKg} kg</strong></span>
+                <span>Salto Attacco: <strong className="text-orange-400">{athlete.spikeReachCm} cm</strong></span>
               </div>
             </div>
           </div>
