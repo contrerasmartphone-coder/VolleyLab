@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
+import { useTheme } from '../../context/ThemeContext';
 import {
   Users,
   Calendar,
@@ -15,6 +16,9 @@ import {
   KeyRound,
   CheckCircle,
   Briefcase,
+  Settings,
+  Sun,
+  Moon,
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
 
@@ -26,6 +30,7 @@ interface HeaderProps {
 
 export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLogin }) => {
   const { currentUser, allUsers, isCoach, isStaff, isAthlete, switchUser, logout } = useAuth();
+  const { theme, toggleTheme } = useTheme();
   const { confirm, showToast } = useDialog();
   const [showSwitchDropdown, setShowSwitchDropdown] = useState(false);
 
@@ -44,28 +49,24 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
     };
   }, [showSwitchDropdown]);
 
-  // Tabs configured strictly by role privileges
+  // Tabs configured strictly by role privileges: Coach e Staff condividono le stesse viste
   const coachTabs = [
     { id: 'athletes', label: 'Atleti', icon: Users },
     { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
     { id: 'matches', label: 'Calendario', icon: Calendar },
     { id: 'users', label: 'Gestione Utenti', icon: KeyRound },
+    { id: 'settings', label: 'Impostazioni', icon: Settings },
   ];
 
-  const staffTabs = [
-    { id: 'athletes', label: 'Atleti', icon: Users },
-    { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
-    { id: 'matches', label: 'Calendario', icon: Calendar },
-  ];
+  const staffTabs = coachTabs;
 
   const athleteTabs = [
     { id: 'my_portal', label: 'Il Mio Portale Atleta', icon: Trophy },
     { id: 'trainings', label: 'Allenamenti', icon: UserCheck },
     { id: 'matches', label: 'Calendario', icon: Calendar },
-    { id: 'athletes', label: 'Atleti', icon: Users },
   ];
 
-  const currentTabs = isCoach ? coachTabs : isStaff ? staffTabs : athleteTabs;
+  const currentTabs = isCoach || isStaff ? coachTabs : athleteTabs;
 
   return (
     <header className="bg-[#0b0e14]/95 border-b border-slate-800 sticky top-0 z-40 shadow-2xl backdrop-blur-md">
@@ -81,8 +82,22 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
             </span>
           </div>
 
-          {/* Active Profile */}
+          {/* Active Profile & Theme Toggle */}
           <div className="flex items-center gap-2">
+            {/* Theme Selector Icon Button */}
+            <button
+              id="theme-toggle-button"
+              onClick={toggleTheme}
+              className="p-2 sm:p-2.5 bg-[#11141d] hover:bg-[#161b26] border border-slate-800 hover:border-slate-700 rounded-2xl transition-all shadow-md cursor-pointer flex items-center justify-center text-xs font-bold"
+              title={theme === 'dark' ? 'Passa al Tema Chiaro' : 'Passa al Tema Scuro'}
+            >
+              {theme === 'dark' ? (
+                <Sun className="w-4.5 h-4.5 text-amber-400 shrink-0" />
+              ) : (
+                <Moon className="w-4.5 h-4.5 text-indigo-600 shrink-0" />
+              )}
+            </button>
+
             {currentUser ? (
               <div className="relative">
                 <button
@@ -194,10 +209,10 @@ export const Header: React.FC<HeaderProps> = ({ activeTab, onTabChange, onOpenLo
                 key={tab.id}
                 id={`nav-tab-${tab.id}`}
                 onClick={() => onTabChange(tab.id)}
-                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all ${
+                className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap border transition-colors ${
                   isActive
-                    ? 'bg-amber-500 text-slate-950 font-bold shadow-md shadow-amber-500/20'
-                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#11141d] hover:border hover:border-slate-800'
+                    ? 'bg-amber-500 text-slate-950 font-bold border-amber-500 shadow-md shadow-amber-500/20'
+                    : 'text-slate-400 hover:text-slate-200 hover:bg-[#11141d] border-transparent hover:border-slate-800'
                 }`}
               >
                 <Icon className={`w-4 h-4 ${isActive ? 'text-slate-950' : 'text-slate-400'}`} />

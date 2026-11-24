@@ -53,10 +53,10 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
   const jumpComparisonData = athletes.map((a) => ({
     name: `${a.jerseyNumber}. ${a.lastName}`,
     role: a.role,
-    spikeReach: a.spikeReachCm,
-    blockReach: a.blockReachCm,
-    netElevation: a.spikeReachCm - a.heightCm,
-    height: a.heightCm,
+    spikeReach: a.spikeReachCm || 0,
+    blockReach: a.blockReachCm || 0,
+    netElevation: (a.spikeReachCm && a.heightCm) ? a.spikeReachCm - a.heightCm : 0,
+    height: a.heightCm || 0,
   })).sort((a, b) => b.spikeReach - a.spikeReach);
 
   // Prepare Radar Comparison Data for 2 selected athletes
@@ -77,7 +77,8 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
   const topScorers = [...athletes].sort((a, b) => (b.stats?.totalPoints || 0) - (a.stats?.totalPoints || 0)).slice(0, 5);
   const topAces = [...athletes].sort((a, b) => (b.stats?.aces || 0) - (a.stats?.aces || 0)).slice(0, 5);
   const topBlockers = [...athletes].sort((a, b) => (b.stats?.blockPoints || 0) - (a.stats?.blockPoints || 0)).slice(0, 5);
-  const topJumpers = [...athletes].sort((a, b) => (b.spikeReachCm - b.heightCm) - (a.spikeReachCm - a.heightCm)).slice(0, 5);
+  const getJumpElev = (a: Athlete) => (a.spikeReachCm && a.heightCm) ? a.spikeReachCm - a.heightCm : 0;
+  const topJumpers = [...athletes].filter((a) => a.spikeReachCm && a.heightCm).sort((a, b) => getJumpElev(b) - getJumpElev(a)).slice(0, 5);
 
   return (
     <div className="space-y-6">
@@ -390,7 +391,7 @@ export const ProgressDashboard: React.FC<ProgressDashboardProps> = ({
                   </div>
                 </div>
                 <span className="text-xs font-black text-cyan-400 shrink-0 ml-2">
-                  +{ath.spikeReachCm - ath.heightCm} cm
+                  {(ath.spikeReachCm && ath.heightCm) ? `+${ath.spikeReachCm - ath.heightCm} cm` : 'N/D'}
                 </span>
               </div>
             ))}

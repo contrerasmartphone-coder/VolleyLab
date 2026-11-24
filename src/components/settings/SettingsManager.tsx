@@ -25,6 +25,7 @@ import {
   createFullSystemBackup,
   restoreSystemFromBackup,
   saveLocalRestorePoint,
+  resolveRestorePointData,
   getLocalRestorePoints,
   deleteLocalRestorePoint,
   subscribeRestorePoints,
@@ -55,6 +56,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const [restorePoints, setRestorePoints] = useState<LocalRestorePoint[]>([]);
   const [newPointLabel, setNewPointLabel] = useState('');
   const [isExporting, setIsExporting] = useState(false);
+  const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
   const [isRestoring, setIsRestoring] = useState(false);
 
   // Snapshot restore modal state
@@ -121,20 +123,33 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       return;
     }
 
-    const snapshotData = {
-      athletes: [...athletes],
-      trainings: [...trainings],
-      matches: [...matches],
-      users: [...users],
-    };
+    try {
+      setIsSavingSnapshot(true);
+      const snapshotPayload = await createFullSystemBackup({
+        athletes,
+        trainings,
+        matches,
+        users,
+      });
 
-    await saveLocalRestorePoint(newPointLabel, snapshotData);
-    setNewPointLabel('');
+      await saveLocalRestorePoint(newPointLabel, snapshotPayload.data);
+      setNewPointLabel('');
 
-    showToast({
-      message: 'Punto di ripristino salvato nel cloud Firestore e accessibile a tutti gli utenti!',
-      type: 'success',
-    });
+      showToast({
+        message: 'Punto di ripristino salvato nel cloud Firestore e accessibile a tutti gli utenti!',
+        type: 'success',
+      });
+    } catch (err: any) {
+      console.error('Snapshot creation error:', err);
+      showToast({
+        message: err?.message
+          ? `Errore salvataggio snapshot: ${err.message}`
+          : 'Errore durante il salvataggio dello snapshot su Firestore.',
+        type: 'error',
+      });
+    } finally {
+      setIsSavingSnapshot(false);
+    }
   };
 
   // 3. Handle File Selection for Restore
@@ -209,7 +224,8 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
     try {
       setIsRestoring(true);
-      const result = await restoreSystemFromBackup(selectedSnapshotForRestore.data, snapshotRestoreMode);
+      const resolvedData = await resolveRestorePointData(selectedSnapshotForRestore);
+      const result = await restoreSystemFromBackup(resolvedData, snapshotRestoreMode);
 
       showToast({
         message: snapshotRestoreMode === 'replace'
@@ -219,10 +235,10 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       });
 
       setSelectedSnapshotForRestore(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error('Restore point error:', err);
       showToast({
-        message: 'Errore durante l\'applicazione del punto di ripristino nel cloud.',
+        message: err?.message || 'Errore durante l\'applicazione del punto di ripristino nel cloud.',
         type: 'error',
       });
     } finally {
@@ -241,11 +257,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     });
 
     if (confirmed) {
-      await deleteLocalRestorePoint(pointId);
-      showToast({
-        message: 'Punto di ripristino eliminato dal cloud per tutti gli utenti.',
-        type: 'info',
-      });
+      try {
+        await deleteLocalRestorePoint(pointId);
+        showToast({
+          message: 'Punto di ripristino eliminato dal cloud per tutti gli utenti.',
+          type: 'info',
+        });
+      } catch (err) {
+        console.error('Delete restore point error:', err);
+        showToast({
+          message: 'Errore durante l\'eliminazione dello snapshot dal cloud.',
+          type: 'error',
+        });
+      }
     }
   };
 
@@ -353,10 +377,11 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
               <button
                 type="button"
                 onClick={handleCreateRestorePoint}
-                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 hover:border-amber-500/30 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shrink-0"
+                disabled={isSavingSnapshot}
+                className="px-4 py-2.5 bg-slate-800 hover:bg-slate-700 text-amber-400 hover:text-amber-300 border border-slate-700 hover:border-amber-500/30 font-bold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer shrink-0 disabled:opacity-50"
               >
-                <BookmarkPlus className="w-4 h-4" />
-                Salva Snapshot Cloud
+                <BookmarkPlus className={`w-4 h-4 ${isSavingSnapshot ? 'animate-pulse' : ''}`} />
+                {isSavingSnapshot ? 'Salvataggio...' : 'Salva Snapshot Cloud'}
               </button>
             </div>
             <p className="text-[11px] text-slate-500">

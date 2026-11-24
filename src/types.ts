@@ -90,10 +90,10 @@ export interface Athlete {
   role: AthleteRole;
   secondaryRole?: AthleteRole;
   birthDate: string;
-  heightCm: number;
-  weightKg: number;
-  spikeReachCm: number;
-  blockReachCm: number;
+  heightCm?: number;
+  weightKg?: number;
+  spikeReachCm?: number;
+  blockReachCm?: number;
   medicalCertExpiry: string;
   medicalCertValid: boolean;
   phone: string;
@@ -123,6 +123,12 @@ export interface TrainingAttendee {
   performanceRating?: number; // 1-5
 }
 
+export interface TrainingAbsence {
+  athleteId: string;
+  reason?: string;
+  communicatedAt?: string;
+}
+
 export interface TrainingSession {
   id: string;
   date: string; // YYYY-MM-DD
@@ -137,6 +143,7 @@ export interface TrainingSession {
   coachNotes?: string;
   maxParticipants?: number;
   registeredAthleteIds: string[]; // Atleti iscritti tramite dashboard
+  absentAthletes?: TrainingAbsence[]; // Assenze comunicate dagli atleti
   attendees: TrainingAttendee[]; // Presenze effettive segnate dal coach
   status: 'programmato' | 'in_corso' | 'completato' | 'annullato';
 }

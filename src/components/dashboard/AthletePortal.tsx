@@ -39,6 +39,7 @@ interface AthletePortalProps {
   trainings: TrainingSession[];
   matches: MatchEvent[];
   onToggleTrainingReg: (training: TrainingSession) => Promise<void>;
+  onToggleTrainingAbsence: (training: TrainingSession, reason?: string) => Promise<void>;
   onConfirmMatchCallUp: (match: MatchEvent, status: 'confermato' | 'non_disponibile') => Promise<void>;
   onOpenMyDetailModal: () => void;
 }
@@ -48,6 +49,7 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
   trainings,
   matches,
   onToggleTrainingReg,
+  onToggleTrainingAbsence,
   onConfirmMatchCallUp,
   onOpenMyDetailModal,
 }) => {
@@ -65,10 +67,11 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
     );
   }
 
-  // Upcoming trainings (next 5)
+  // Upcoming trainings (next 4 in chronological order)
   const nowStr = new Date().toISOString().split('T')[0];
   const upcomingTrainings = trainings
-    .filter((t) => t.date >= nowStr || t.status === 'programmato')
+    .filter((t) => t.date >= nowStr && t.status === 'programmato')
+    .sort((a, b) => a.date.localeCompare(b.date))
     .slice(0, 4);
 
   // Upcoming matches with call-up for this athlete
@@ -132,14 +135,20 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                {athlete.category} • Visita medica valida fino al{' '}
-                <strong className="text-emerald-400">{athlete.medicalCertExpiry}</strong>
+                {athlete.medicalCertExpiry ? (
+                  <>
+                    Visita medica valida fino al{' '}
+                    <strong className="text-emerald-400">{athlete.medicalCertExpiry}</strong>
+                  </>
+                ) : (
+                  <span className="text-slate-500">Scadenza visita medica non specificata</span>
+                )}
               </p>
 
               <div className="flex items-center gap-4 mt-3 text-xs text-slate-300">
-                <span>Altezza: <strong className="text-white">{athlete.heightCm} cm</strong></span>
-                <span>Peso: <strong className="text-white">{athlete.weightKg} kg</strong></span>
-                <span>Salto Attacco: <strong className="text-orange-400">{athlete.spikeReachCm} cm</strong></span>
+                <span>Altezza: <strong className="text-white">{athlete.heightCm ? `${athlete.heightCm} cm` : 'N/D'}</strong></span>
+                <span>Peso: <strong className="text-white">{athlete.weightKg ? `${athlete.weightKg} kg` : 'N/D'}</strong></span>
+                <span>Salto Attacco: <strong className="text-orange-400">{athlete.spikeReachCm ? `${athlete.spikeReachCm} cm` : 'N/D'}</strong></span>
               </div>
             </div>
           </div>
@@ -220,13 +229,16 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
             ) : (
               upcomingTrainings.map((session) => {
                 const isRegistered = session.registeredAthleteIds?.includes(athlete.id);
+                const absenceRecord = session.absentAthletes?.find((a) => a.athleteId === athlete.id);
+                const isAbsent = Boolean(absenceRecord);
+
                 return (
                   <div
                     key={session.id}
                     className="p-4 bg-slate-950/60 rounded-2xl border border-slate-800/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
                   >
-                    <div className="space-y-1">
-                      <div className="flex items-center gap-2">
+                    <div className="space-y-1 min-w-0">
+                      <div className="flex items-center flex-wrap gap-2">
                         <span className="text-xs font-bold text-white">{session.title}</span>
                         <span className="px-2 py-0.5 text-[9px] font-bold uppercase rounded bg-slate-800 text-orange-400 border border-slate-700">
                           {session.primaryFocus}
@@ -240,33 +252,84 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                         <MapPin className="w-3 h-3 text-slate-600" />
                         {session.location}
                       </p>
+                      {isAbsent && absenceRecord?.reason && (
+                        <p className="text-[11px] text-rose-300/90 italic pt-0.5">
+                          Motivo assenza: {absenceRecord.reason}
+                        </p>
+                      )}
                     </div>
 
-                    <button
-                      id={`athlete-portal-toggle-${session.id}`}
-                      onClick={async () => {
-                        await onToggleTrainingReg(session);
-                        showToast({
-                          message: isRegistered
-                            ? 'Iscrizione all\'allenamento rimossa'
-                            : 'Presenza all\'allenamento registrata!',
-                          type: isRegistered ? 'info' : 'success',
-                        });
-                      }}
-                      className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all shrink-0 cursor-pointer ${
-                        isRegistered
-                          ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-rose-950/30 hover:text-rose-300'
-                          : 'bg-orange-600 hover:bg-orange-500 text-white shadow-md shadow-orange-600/20'
-                      }`}
-                    >
-                      {isRegistered ? (
-                        <>
-                          <Check className="w-3.5 h-3.5" /> Iscritto
-                        </>
-                      ) : (
-                        '+ Iscriviti'
-                      )}
-                    </button>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        id={`athlete-portal-toggle-${session.id}`}
+                        onClick={async () => {
+                          await onToggleTrainingReg(session);
+                          showToast({
+                            message: isRegistered
+                              ? 'Iscrizione all\'allenamento rimossa'
+                              : 'Iscrizione all\'allenamento confermata!',
+                            type: isRegistered ? 'info' : 'success',
+                          });
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          isRegistered
+                            ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-500/30'
+                            : 'bg-orange-600 hover:bg-orange-500 text-white shadow-md shadow-orange-600/20'
+                        }`}
+                        title={isRegistered ? 'Clicca per rimuovere iscrizione' : 'Iscriviti alla seduta'}
+                      >
+                        {isRegistered ? (
+                          <>
+                            <Check className="w-3.5 h-3.5" /> Iscritto
+                          </>
+                        ) : (
+                          'Iscriviti'
+                        )}
+                      </button>
+
+                      <button
+                        id={`athlete-portal-absence-${session.id}`}
+                        onClick={async () => {
+                          if (isAbsent) {
+                            await onToggleTrainingAbsence(session);
+                            showToast({
+                              message: 'Comunicazione di assenza annullata',
+                              type: 'info',
+                            });
+                          } else {
+                            const reason = await prompt({
+                              title: 'Comunica Assenza Allenamento',
+                              message: `Vuoi comunicare allo staff la tua assenza per "${session.title}" del ${session.date}?`,
+                              placeholder: 'Motivo facoltativo (es. Lavoro, Studio, Indisposizione...)',
+                              confirmText: 'Comunica Assenza',
+                              cancelText: 'Annulla',
+                              required: false,
+                            });
+                            if (reason !== null) {
+                              await onToggleTrainingAbsence(session, reason);
+                              showToast({
+                                message: 'Assenza comunicata allo staff tecnico',
+                                type: 'warning',
+                              });
+                            }
+                          }
+                        }}
+                        className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                          isAbsent
+                            ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
+                            : 'bg-slate-800/80 hover:bg-rose-950/50 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40'
+                        }`}
+                        title={isAbsent ? 'Clicca per annullare la comunicazione di assenza' : 'Comunica la tua assenza allo staff'}
+                      >
+                        {isAbsent ? (
+                          <>
+                            <XCircle className="w-3.5 h-3.5" /> Assenza Comunicata
+                          </>
+                        ) : (
+                          'Comunica Assenza'
+                        )}
+                      </button>
+                    </div>
                   </div>
                 );
               })

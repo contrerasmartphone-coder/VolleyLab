@@ -24,6 +24,24 @@ import {
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
 
+export const STANDARD_GYMS = [
+  'Palestra Scuola ICS Cruillas - Plesso Mendelssohn',
+  'Palestra Scuola Leonardo Da Vinci',
+];
+
+export function calculateDurationMinutes(startTime?: string, endTime?: string): number {
+  if (!startTime || !endTime) return 0;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  if (isNaN(sh) || isNaN(sm) || isNaN(eh) || isNaN(em)) return 0;
+  let startMinutes = sh * 60 + sm;
+  let endMinutes = eh * 60 + em;
+  if (endMinutes < startMinutes) {
+    endMinutes += 24 * 60;
+  }
+  return endMinutes - startMinutes;
+}
+
 interface TrainingManagerProps {
   trainings: TrainingSession[];
   athletes: Athlete[];
@@ -41,44 +59,47 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
   onDeleteTraining,
   isCoach,
 }) => {
-  const { confirm, showToast } = useDialog();
+  const { confirm, prompt, showToast } = useDialog();
   const isStaff = currentUser?.role === 'staff';
-  const canTakeAttendance = isCoach || isStaff;
+  const canManage = isCoach || isStaff;
+  const canTakeAttendance = canManage;
   const isAthlete = currentUser?.role === 'athlete';
   const [filterStatus, setFilterStatus] = useState<'all' | 'programmato' | 'completato'>('all');
   const [selectedTraining, setSelectedTraining] = useState<TrainingSession | null>(null);
-  const [showAddModal, setShowAddModal] = useState(false);
+  const [isFormModalOpen, setIsFormModalOpen] = useState(false);
+  const [editingTrainingId, setEditingTrainingId] = useState<string | null>(null);
   const [activeTabModal, setActiveTabModal] = useState<'details' | 'drills' | 'attendance'>('attendance');
 
-  // Form states for creating a new training
-  const [newTraining, setNewTraining] = useState<Partial<TrainingSession>>({
-    date: new Date(Date.now() + 2 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-    startTime: '19:30',
-    endTime: '21:30',
-    location: 'Palazzetto dello Sport "PalaVolley" - Campo Principale',
+  // Form states for creating / editing a training session
+  const [formData, setFormData] = useState({
+    date: '',
+    startTime: '',
+    endTime: '',
+    gymSelection: '',
+    customGym: '',
     teamCategory: 'Serie C Maschile',
     title: '',
     objective: '',
-    primaryFocus: 'Ricezione/Attacco',
-    drills: [
-      { id: 'dr-1', name: 'Riscaldamento & Prevenzione', durationMinutes: 15, description: 'Mobilità articolare ed elastici' },
-      { id: 'dr-2', name: 'Esercizio Fondamentale', durationMinutes: 30, description: 'Lavoro tecnico a tema' },
-      { id: 'dr-3', name: 'Sei contro Sei / Situazionale', durationMinutes: 45, description: 'Partita con regole vincolate' },
-    ],
+    primaryFocus: 'Ricezione/Attacco' as TrainingSession['primaryFocus'],
     coachNotes: '',
-    registeredAthleteIds: [],
-    attendees: [],
-    status: 'programmato',
+    drills: [] as TrainingDrill[],
   });
 
   // Helper for current athlete's ID
   const currentAthleteId = currentUser?.role === 'athlete' ? currentUser.athleteId : null;
 
-  // Filter trainings
-  const filteredTrainings = trainings.filter((t) => {
-    if (filterStatus === 'all') return true;
-    return t.status === filterStatus;
-  });
+  // Filter & sort trainings (upcoming chronologically, completed most-recent first)
+  const filteredTrainings = trainings
+    .filter((t) => {
+      if (filterStatus === 'all') return true;
+      return t.status === filterStatus;
+    })
+    .sort((a, b) => {
+      if (filterStatus === 'completato') {
+        return b.date.localeCompare(a.date);
+      }
+      return a.date.localeCompare(b.date);
+    });
 
   // Handle Athlete Toggle Registration
   const handleToggleRegistration = async (training: TrainingSession) => {
@@ -86,16 +107,19 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
 
     const isRegistered = training.registeredAthleteIds?.includes(currentAthleteId);
     let updatedRegistered = training.registeredAthleteIds || [];
+    let updatedAbsences = training.absentAthletes || [];
 
     if (isRegistered) {
       updatedRegistered = updatedRegistered.filter((id) => id !== currentAthleteId);
     } else {
       updatedRegistered = [...updatedRegistered, currentAthleteId];
+      updatedAbsences = updatedAbsences.filter((a) => a.athleteId !== currentAthleteId);
     }
 
     const updatedTraining: TrainingSession = {
       ...training,
       registeredAthleteIds: updatedRegistered,
+      absentAthletes: updatedAbsences,
     };
 
     await onSaveTraining(updatedTraining);
@@ -104,8 +128,71 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
     }
 
     showToast({
-      message: isRegistered ? 'Iscrizione sessione annullata' : 'Presenza segnata per l\'allenamento!',
+      message: isRegistered ? 'Iscrizione sessione annullata' : 'Iscrizione all\'allenamento confermata!',
       type: isRegistered ? 'info' : 'success',
+    });
+  };
+
+  // Handle Athlete Communicating Absence
+  const handleCommunicateAbsence = async (training: TrainingSession) => {
+    if (!currentAthleteId) return;
+
+    const currentAbsences = training.absentAthletes || [];
+    const isAlreadyAbsent = currentAbsences.some((a) => a.athleteId === currentAthleteId);
+
+    if (isAlreadyAbsent) {
+      const updatedTraining: TrainingSession = {
+        ...training,
+        absentAthletes: currentAbsences.filter((a) => a.athleteId !== currentAthleteId),
+      };
+      await onSaveTraining(updatedTraining);
+      if (selectedTraining?.id === training.id) {
+        setSelectedTraining(updatedTraining);
+      }
+      showToast({
+        message: 'Comunicazione di assenza rimossa',
+        type: 'info',
+      });
+      return;
+    }
+
+    const reason = await prompt({
+      title: 'Comunica Assenza Allenamento',
+      message: `Comunica allo staff la tua assenza per "${training.title}" del ${formatDate(training.date)}:`,
+      placeholder: 'Motivo facoltativo (es. Lavoro, Studio, Indisposizione...)',
+      confirmText: 'Comunica Assenza',
+      cancelText: 'Annulla',
+      required: false,
+    });
+
+    if (reason === null) return;
+
+    const updatedRegistered = (training.registeredAthleteIds || []).filter(
+      (id) => id !== currentAthleteId
+    );
+    const updatedAbsences = [
+      ...currentAbsences,
+      {
+        athleteId: currentAthleteId,
+        reason: reason.trim() || undefined,
+        communicatedAt: new Date().toISOString(),
+      },
+    ];
+
+    const updatedTraining: TrainingSession = {
+      ...training,
+      registeredAthleteIds: updatedRegistered,
+      absentAthletes: updatedAbsences,
+    };
+
+    await onSaveTraining(updatedTraining);
+    if (selectedTraining?.id === training.id) {
+      setSelectedTraining(updatedTraining);
+    }
+
+    showToast({
+      message: 'Assenza comunicata allo staff tecnico!',
+      type: 'warning',
     });
   };
 
@@ -150,35 +237,231 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
     });
   };
 
-  // Handle Create Training Submit
-  const handleCreateTrainingSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newTraining.title || !newTraining.date) return;
-
-    const created: TrainingSession = {
-      id: `train-${Date.now()}`,
-      date: newTraining.date || new Date().toISOString().split('T')[0],
-      startTime: newTraining.startTime || '19:30',
-      endTime: newTraining.endTime || '21:30',
-      location: newTraining.location || 'Palazzetto dello Sport',
-      teamCategory: newTraining.teamCategory || 'Serie C Maschile',
-      title: newTraining.title || 'Sessione Tecnica',
-      objective: newTraining.objective || 'Perfezionamento schemi di gioco',
-      primaryFocus: newTraining.primaryFocus || 'Ricezione/Attacco',
-      drills: newTraining.drills || [],
-      coachNotes: newTraining.coachNotes || '',
-      registeredAthleteIds: [],
-      attendees: [],
-      status: 'programmato',
-    };
-
-    await onSaveTraining(created);
-    showToast({
-      message: `Nuova sessione di allenamento "${created.title}" programmata!`,
-      type: 'success',
+  // Open Create Training Modal
+  const handleOpenCreateModal = () => {
+    setEditingTrainingId(null);
+    setFormData({
+      date: '',
+      startTime: '',
+      endTime: '',
+      gymSelection: '',
+      customGym: '',
+      teamCategory: 'Serie C Maschile',
+      title: '',
+      objective: '',
+      primaryFocus: 'Ricezione/Attacco',
+      coachNotes: '',
+      drills: [],
     });
-    setShowAddModal(false);
-    setSelectedTraining(created);
+    setIsFormModalOpen(true);
+  };
+
+  // Open Edit Training Modal
+  const handleOpenEditModal = (training: TrainingSession) => {
+    setEditingTrainingId(training.id);
+    const isStandard = STANDARD_GYMS.includes(training.location);
+    setFormData({
+      date: training.date,
+      startTime: training.startTime,
+      endTime: training.endTime,
+      gymSelection: isStandard ? training.location : 'altro',
+      customGym: isStandard ? '' : training.location,
+      teamCategory: training.teamCategory || 'Serie C Maschile',
+      title: training.title,
+      objective: training.objective,
+      primaryFocus: training.primaryFocus,
+      coachNotes: training.coachNotes || '',
+      drills: training.drills && training.drills.length > 0
+        ? training.drills.map((d) => ({ ...d }))
+        : [],
+    });
+    setIsFormModalOpen(true);
+  };
+
+  // Drill helpers in form
+  const handleAddDrill = () => {
+    const currentTotal = formData.drills.reduce((sum, d) => sum + (Number(d.durationMinutes) || 0), 0);
+    const totalDuration = calculateDurationMinutes(formData.startTime, formData.endTime);
+    const remaining = Math.max(0, totalDuration - currentTotal);
+    const newDrill: TrainingDrill = {
+      id: `dr-${Date.now()}-${formData.drills.length + 1}`,
+      name: '',
+      durationMinutes: remaining > 0 ? remaining : 15,
+      description: '',
+    };
+    setFormData((prev) => ({
+      ...prev,
+      drills: [...prev.drills, newDrill],
+    }));
+  };
+
+  const handleUpdateDrill = (index: number, field: keyof TrainingDrill, value: any) => {
+    setFormData((prev) => {
+      const updated = [...prev.drills];
+      updated[index] = {
+        ...updated[index],
+        [field]: field === 'durationMinutes' ? (value === '' ? '' : Math.max(0, Number(value))) : value,
+      };
+      return { ...prev, drills: updated };
+    });
+  };
+
+  const handleRemoveDrill = (index: number) => {
+    setFormData((prev) => ({
+      ...prev,
+      drills: prev.drills.filter((_, i) => i !== index),
+    }));
+  };
+
+  const handleAutoFitRemaining = () => {
+    const totalDuration = calculateDurationMinutes(formData.startTime, formData.endTime);
+    if (formData.drills.length === 0 || totalDuration <= 0) return;
+    const currentOthers = formData.drills.slice(0, -1).reduce((sum, d) => sum + (Number(d.durationMinutes) || 0), 0);
+    const fittedDuration = Math.max(1, totalDuration - currentOthers);
+    setFormData((prev) => {
+      const updated = [...prev.drills];
+      const lastIdx = updated.length - 1;
+      updated[lastIdx] = {
+        ...updated[lastIdx],
+        durationMinutes: fittedDuration,
+      };
+      return { ...prev, drills: updated };
+    });
+  };
+
+  // Handle Form Submit (Create or Edit) with strict duration saturation validation
+  const handleFormSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!formData.title.trim() || !formData.date) {
+      showToast({ message: 'Inserisci il titolo e la data della sessione.', type: 'error' });
+      return;
+    }
+
+    if (!formData.gymSelection) {
+      showToast({ message: 'Seleziona una palestra per la sessione.', type: 'error' });
+      return;
+    }
+
+    if (formData.gymSelection === 'altro' && !formData.customGym.trim()) {
+      showToast({ message: 'Specifica la palestra o sede dell\'allenamento fuori sede.', type: 'error' });
+      return;
+    }
+
+    const totalDuration = calculateDurationMinutes(formData.startTime, formData.endTime);
+    if (totalDuration <= 0) {
+      showToast({
+        message: 'L\'orario di fine deve essere successivo all\'orario di inizio.',
+        type: 'error',
+      });
+      return;
+    }
+
+    if (formData.drills.length === 0) {
+      showToast({
+        message: 'Inserisci almeno un esercizio nella scheda dell\'allenamento.',
+        type: 'error',
+      });
+      return;
+    }
+
+    const hasEmptyName = formData.drills.some((d) => !d.name.trim());
+    if (hasEmptyName) {
+      showToast({
+        message: 'Tutti gli esercizi devono avere un nome valido specificato.',
+        type: 'error',
+      });
+      return;
+    }
+
+    const hasZeroDuration = formData.drills.some((d) => Number(d.durationMinutes) <= 0);
+    if (hasZeroDuration) {
+      showToast({
+        message: 'La durata di ciascun esercizio deve essere di almeno 1 minuto.',
+        type: 'error',
+      });
+      return;
+    }
+
+    const totalDrillsMinutes = formData.drills.reduce(
+      (sum, d) => sum + (Number(d.durationMinutes) || 0),
+      0
+    );
+
+    if (totalDrillsMinutes !== totalDuration) {
+      const diff = totalDuration - totalDrillsMinutes;
+      showToast({
+        message: diff > 0
+          ? `La somma degli esercizi (${totalDrillsMinutes} min) non satura la durata dell'allenamento (${totalDuration} min). Mancano ancora ${diff} minuti.`
+          : `La somma degli esercizi (${totalDrillsMinutes} min) supera la durata dell'allenamento (${totalDuration} min) di ${Math.abs(diff)} minuti.`,
+        type: 'error',
+      });
+      return;
+    }
+
+    const location = formData.gymSelection === 'altro'
+      ? (formData.customGym.trim() || 'Palestra Fuori Sede')
+      : formData.gymSelection;
+
+    const normalizedDrills: TrainingDrill[] = formData.drills.map((d, idx) => ({
+      id: d.id || `dr-${Date.now()}-${idx + 1}`,
+      name: d.name.trim(),
+      durationMinutes: Number(d.durationMinutes),
+      description: d.description?.trim() || '',
+    }));
+
+    if (editingTrainingId) {
+      const existing = trainings.find((t) => t.id === editingTrainingId);
+      if (!existing) return;
+      const updated: TrainingSession = {
+        ...existing,
+        date: formData.date,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        location,
+        teamCategory: formData.teamCategory,
+        title: formData.title.trim(),
+        objective: formData.objective.trim() || 'Sessione Tecnica',
+        primaryFocus: formData.primaryFocus,
+        coachNotes: formData.coachNotes.trim(),
+        drills: normalizedDrills,
+      };
+
+      await onSaveTraining(updated);
+      if (selectedTraining?.id === editingTrainingId) {
+        setSelectedTraining(updated);
+      }
+      showToast({
+        message: `Sessione "${updated.title}" aggiornata con successo!`,
+        type: 'success',
+      });
+    } else {
+      const created: TrainingSession = {
+        id: `train-${Date.now()}`,
+        date: formData.date,
+        startTime: formData.startTime,
+        endTime: formData.endTime,
+        location,
+        teamCategory: formData.teamCategory,
+        title: formData.title.trim(),
+        objective: formData.objective.trim() || 'Sessione Tecnica',
+        primaryFocus: formData.primaryFocus,
+        drills: normalizedDrills,
+        coachNotes: formData.coachNotes.trim(),
+        registeredAthleteIds: [],
+        absentAthletes: [],
+        attendees: [],
+        status: 'programmato',
+      };
+
+      await onSaveTraining(created);
+      setSelectedTraining(created);
+      showToast({
+        message: `Nuova sessione "${created.title}" programmata!`,
+        type: 'success',
+      });
+    }
+
+    setIsFormModalOpen(false);
   };
 
   const getFocusBadgeColor = (focus: string) => {
@@ -206,27 +489,22 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
           <div>
             <div className="flex items-center gap-2 mb-1">
               <h1 className="text-2xl font-black text-white font-display tracking-tight">
-                Pianificazione Allenamenti & Registro Presenze
+                Pianificazione Allenamenti
               </h1>
               <span className="px-2.5 py-0.5 text-xs font-bold bg-amber-500/15 text-amber-400 border border-amber-500/30 rounded-full">
-                {trainings.length} Sessioni
+                {trainings.length === 1 ? '1 Sessione' : `${trainings.length} Sessioni`}
               </span>
             </div>
-            <p className="text-xs text-slate-400">
-              {isCoach
-                ? 'Pianifica le sessioni settimanali, definisci gli obiettivi tecnici e compila il registro presenze'
-                : 'Iscriviti alle prossime sessioni di allenamento e consulta gli obiettivi e gli esercizi previsti'}
-            </p>
           </div>
 
-          {isCoach && (
+          {canManage && (
             <button
               id="create-training-button"
-              onClick={() => setShowAddModal(true)}
+              onClick={handleOpenCreateModal}
               className="flex items-center justify-center gap-2 px-4 py-2.5 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 text-slate-950 text-xs font-bold rounded-xl shadow-lg shadow-amber-500/20 transition-all hover:scale-102"
             >
               <Plus className="w-4 h-4" />
-              Pianifica Nuovo Allenamento
+              Nuovo Allenamento
             </button>
           )}
         </div>
@@ -270,17 +548,20 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
       {filteredTrainings.length === 0 ? (
         <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-12 text-center shadow-xl">
           <Calendar className="w-10 h-10 text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-white">Nessuna sessione di allenamento</h3>
-          <p className="text-xs text-slate-400 mt-1 max-w-md mx-auto">
-            Non ci sono allenamenti corrispondenti al filtro o il registro delle sessioni è vuoto.
-          </p>
+          <h3 className="text-base font-bold text-white">Nessun allenamento trovato</h3>
         </div>
       ) : (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {filteredTrainings.map((session) => {
           const isRegistered = currentAthleteId ? session.registeredAthleteIds?.includes(currentAthleteId) : false;
+          const absenceRecord = currentAthleteId ? session.absentAthletes?.find((a) => a.athleteId === currentAthleteId) : undefined;
+          const isAbsent = Boolean(absenceRecord);
           const attendeeRecord = currentAthleteId ? session.attendees?.find((a) => a.athleteId === currentAthleteId) : null;
-          const registeredAthletes = athletes.filter((a) => session.registeredAthleteIds?.includes(a.id));
+          const registeredIds = new Set(session.registeredAthleteIds || []);
+          const absentIds = new Set((session.absentAthletes || []).map((ab) => ab.athleteId));
+          const registeredAthletes = athletes.filter((a) => registeredIds.has(a.id));
+          const absentCount = athletes.filter((a) => !registeredIds.has(a.id) && absentIds.has(a.id)).length;
+          const pendingCount = athletes.filter((a) => !registeredIds.has(a.id) && !absentIds.has(a.id)).length;
           const presentCount = session.attendees?.filter((a) => a.status === 'presente').length || 0;
 
           return (
@@ -318,13 +599,10 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                   </span>
                 </div>
 
-                {/* Title & Objective */}
+                {/* Title */}
                 <h3 className="text-base font-bold text-white mt-2 font-display">
                   {session.title}
                 </h3>
-                <p className="text-xs text-slate-300 mt-1 line-clamp-2">
-                  {session.objective}
-                </p>
 
                 {/* Location */}
                 <div className="flex items-center gap-1.5 text-xs text-slate-400 mt-3">
@@ -336,7 +614,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                 {session.drills && session.drills.length > 0 && (
                   <div className="mt-3 p-3 bg-[#0b0e14]/80 rounded-2xl border border-slate-800/80 space-y-1.5">
                     <span className="text-[10px] uppercase font-bold text-slate-400 block flex items-center justify-between">
-                      <span>Esercizi & Drills Programmati</span>
+                      <span>ESERCIZI PROGRAMMATI</span>
                       <span>{session.drills.reduce((acc, d) => acc + d.durationMinutes, 0)} min totali</span>
                     </span>
                     <div className="space-y-1">
@@ -350,12 +628,22 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                   </div>
                 )}
 
-                {/* Registered Athletes List */}
-                <div className="mt-3 flex items-center justify-between text-xs">
-                  <div className="flex items-center gap-1.5">
-                    <Users className="w-3.5 h-3.5 text-slate-400" />
-                    <span className="text-slate-400">
-                      Iscritti: <strong className="text-white">{registeredAthletes.length} atleti</strong>
+                {/* Registered Athletes, Absences & Pending Response Summary */}
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs">
+                  <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+                    <div className="flex items-center gap-1.5">
+                      <Users className="w-3.5 h-3.5 text-slate-400" />
+                      <span className="text-slate-400">
+                        Iscritti: <strong className="text-white">{registeredAthletes.length}</strong>
+                      </span>
+                    </div>
+                    {absentCount > 0 && (
+                      <span className="text-rose-400 font-medium text-[11px]">
+                        • Assenze comunicate: <strong>{absentCount}</strong>
+                      </span>
+                    )}
+                    <span className="text-amber-400/90 font-medium text-[11px]">
+                      • In attesa risposta: <strong>{pendingCount}</strong>
                     </span>
                   </div>
 
@@ -365,6 +653,12 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                     </span>
                   )}
                 </div>
+
+                {isAthlete && isAbsent && absenceRecord?.reason && (
+                  <p className="mt-2 text-[11px] text-rose-300/90 bg-rose-950/30 border border-rose-500/20 rounded-xl px-3 py-1.5">
+                    <strong>Tua assenza comunicata:</strong> {absenceRecord.reason}
+                  </p>
+                )}
 
                 {/* Avatar stack */}
                 {registeredAthletes.length > 0 && (
@@ -388,30 +682,56 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               </div>
 
               {/* Action Buttons */}
-              <div className="pt-3 border-t border-slate-800/80 flex items-center justify-between gap-2">
-                {/* Athlete 1-click registration toggle */}
-                {isAthlete && (
-                  <button
-                    id={`toggle-reg-${session.id}`}
-                    onClick={() => handleToggleRegistration(session)}
-                    className={`flex-1 flex items-center justify-center gap-2 py-2 px-3 rounded-xl text-xs font-bold transition-all ${
-                      isRegistered
-                        ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-rose-950/40 hover:text-rose-300 hover:border-rose-800'
-                        : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
-                    }`}
-                  >
-                    {isRegistered ? (
-                      <>
-                        <Check className="w-4 h-4 text-emerald-400" />
-                        Iscritto (Clicca per annullare)
-                      </>
-                    ) : (
-                      <>
-                        <Plus className="w-4 h-4" />
-                        Iscriviti all'Allenamento
-                      </>
-                    )}
-                  </button>
+              <div className="pt-3 border-t border-slate-800/80 flex flex-wrap items-center justify-between gap-2">
+                {/* Athlete 2-choice availability actions: Iscriversi vs Comunicare assenza */}
+                {isAthlete && session.status !== 'completato' && session.status !== 'annullato' && (
+                  <div className="flex flex-1 flex-wrap items-center gap-2">
+                    <button
+                      id={`toggle-reg-${session.id}`}
+                      onClick={() => handleToggleRegistration(session)}
+                      className={`flex-1 min-w-[120px] flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isRegistered
+                          ? 'bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 hover:bg-emerald-600/30'
+                          : 'bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold shadow-lg shadow-amber-500/20'
+                      }`}
+                      title={isRegistered ? 'Clicca per annullare l\'iscrizione' : 'Iscriviti alla seduta'}
+                    >
+                      {isRegistered ? (
+                        <>
+                          <Check className="w-4 h-4 text-emerald-400" />
+                          Iscritto
+                        </>
+                      ) : (
+                        <>
+                          <Plus className="w-4 h-4" />
+                          Iscriviti
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      id={`toggle-absence-${session.id}`}
+                      onClick={() => handleCommunicateAbsence(session)}
+                      className={`flex-1 min-w-[140px] flex items-center justify-center gap-1.5 py-2 px-3 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                        isAbsent
+                          ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 hover:bg-rose-500/30'
+                          : 'bg-[#0b0e14] hover:bg-rose-950/40 text-slate-300 hover:text-rose-300 border border-slate-700 hover:border-rose-500/40'
+                      }`}
+                      title={isAbsent ? 'Clicca per rimuovere la comunicazione di assenza' : 'Comunica la tua assenza allo staff'}
+                    >
+                      {isAbsent ? (
+                        <>
+                          <XCircle className="w-4 h-4 text-rose-400" />
+                          Assenza Comunicata
+                        </>
+                      ) : (
+                        <>
+                          <XCircle className="w-4 h-4" />
+                          Comunica Assenza
+                        </>
+                      )}
+                    </button>
+                  </div>
                 )}
 
                 {/* Open Attendance & Management Modal */}
@@ -426,8 +746,52 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                   }`}
                 >
                   <ClipboardList className="w-4 h-4 text-amber-400" />
-                  {canTakeAttendance ? 'Gestisci Presenze & Dettagli' : 'Dettagli & Drills'}
+                  Dettagli
                 </button>
+
+                {/* Edit & Delete Buttons for Coach & Staff */}
+                {canManage && (
+                  <>
+                    <button
+                      id={`edit-training-btn-${session.id}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleOpenEditModal(session);
+                      }}
+                      className="p-2 text-slate-400 hover:text-amber-400 hover:bg-[#161b26] border border-slate-700 rounded-xl transition-colors cursor-pointer"
+                      title="Modifica allenamento ed esercizi"
+                    >
+                      <Edit2 className="w-4 h-4" />
+                    </button>
+
+                    {onDeleteTraining && (
+                      <button
+                        id={`delete-training-btn-${session.id}`}
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const confirmed = await confirm({
+                            title: 'Elimina Sessione di Allenamento',
+                            message: `Sei sicuro di voler eliminare la sessione "${session.title || 'Allenamento'}" del ${formatDate(session.date)}? L'operazione cancellerà tutti i dettagli e il registro presenze.`,
+                            confirmText: 'Sì, Elimina Sessione',
+                            cancelText: 'Annulla',
+                            type: 'danger',
+                          });
+                          if (confirmed) {
+                            await onDeleteTraining(session.id);
+                            showToast({
+                              message: `Sessione "${session.title || 'Allenamento'}" eliminata`,
+                              type: 'info',
+                            });
+                          }
+                        }}
+                        className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 border border-slate-700 rounded-xl transition-colors cursor-pointer"
+                        title="Elimina allenamento"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </>
+                )}
               </div>
             </div>
           );
@@ -464,7 +828,17 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               </div>
 
               <div className="flex items-center gap-2">
-                {isCoach && onDeleteTraining && (
+                {canManage && (
+                  <button
+                    id="edit-modal-training-btn"
+                    onClick={() => handleOpenEditModal(selectedTraining)}
+                    className="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-950/30 rounded-xl transition-colors cursor-pointer"
+                    title="Modifica allenamento ed esercizi"
+                  >
+                    <Edit2 className="w-4 h-4" />
+                  </button>
+                )}
+                {canManage && onDeleteTraining && (
                   <button
                     onClick={async () => {
                       const confirmed = await confirm({
@@ -499,11 +873,11 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
             </div>
 
             {/* Navigation Tabs in Modal */}
-            <div className="flex items-center gap-2 px-6 py-2 border-b border-slate-800 bg-[#0b0e14]/60">
-              {isCoach && (
+            <div className="flex items-center gap-2 px-4 sm:px-6 py-2 border-b border-slate-800 bg-[#0b0e14]/60 overflow-x-auto">
+              {canManage && (
                 <button
                   onClick={() => setActiveTabModal('attendance')}
-                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                  className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                     activeTabModal === 'attendance'
                       ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                       : 'text-slate-400 hover:text-white'
@@ -514,7 +888,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               )}
               <button
                 onClick={() => setActiveTabModal('drills')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
                   activeTabModal === 'drills'
                     ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
                     : 'text-slate-400 hover:text-white'
@@ -522,31 +896,37 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               >
                 Esercizi & Scheda Tecnica ({selectedTraining.drills?.length || 0})
               </button>
-              <button
-                onClick={() => setActiveTabModal('details')}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
-                  activeTabModal === 'details'
-                    ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
-                    : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                Atleti Iscritti ({selectedTraining.registeredAthleteIds?.length || 0})
-              </button>
+              {(() => {
+                const regIds = new Set(selectedTraining.registeredAthleteIds || []);
+                const absIds = new Set((selectedTraining.absentAthletes || []).map((ab) => ab.athleteId));
+                const regCount = athletes.filter((a) => regIds.has(a.id)).length;
+                const absCount = athletes.filter((a) => !regIds.has(a.id) && absIds.has(a.id)).length;
+                const pendCount = athletes.filter((a) => !regIds.has(a.id) && !absIds.has(a.id)).length;
+                return (
+                  <button
+                    onClick={() => setActiveTabModal('details')}
+                    className={`shrink-0 whitespace-nowrap px-3 py-1.5 rounded-xl text-xs font-bold transition-all ${
+                      activeTabModal === 'details'
+                        ? 'bg-amber-500/15 text-amber-400 border border-amber-500/30'
+                        : 'text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    Iscritti ({regCount}) / Assenti ({absCount}) / In attesa ({pendCount})
+                  </button>
+                );
+              })()}
             </div>
 
             {/* Modal Body */}
-            <div className="flex-1 overflow-y-auto p-6 space-y-4">
+            <div className="flex-1 overflow-y-auto p-4 sm:p-6 space-y-4">
               {/* TAB: ATTENDANCE REGISTER */}
               {activeTabModal === 'attendance' && (
                 <div className="space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
                       <h3 className="text-sm font-bold text-white">Registro Presenze di Squadra</h3>
-                      <p className="text-xs text-slate-400">
-                        Clicca sullo stato per registrare la presenza o assenza di ogni atleta
-                      </p>
                     </div>
-                    {isCoach && (
+                    {canManage && (
                       <button
                         onClick={async () => {
                           const confirmed = await confirm({
@@ -564,9 +944,17 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                             status: 'completato' as const,
                             attendees: athletes.map((a) => {
                               const isReg = selectedTraining.registeredAthleteIds?.includes(a.id);
+                              const communicatedAbs = selectedTraining.absentAthletes?.find((ab) => ab.athleteId === a.id);
                               return {
                                 athleteId: a.id,
-                                status: (a.status === 'infortunato' ? 'infortunato' : isReg ? 'presente' : 'assente') as any,
+                                status: (a.status === 'infortunato'
+                                  ? 'infortunato'
+                                  : isReg
+                                  ? 'presente'
+                                  : communicatedAbs
+                                  ? 'giustificato'
+                                  : 'assente') as any,
+                                coachNotes: communicatedAbs?.reason,
                                 performanceRating: 4,
                               };
                             }),
@@ -585,9 +973,9 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                     )}
                   </div>
 
-                  <div className="bg-[#0b0e14] rounded-2xl border border-slate-800 overflow-hidden">
-                    <table className="w-full text-left text-xs">
-                      <thead className="bg-[#11141d] text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                  <div className="bg-[#0b0e14] rounded-2xl border border-slate-800 overflow-x-auto">
+                    <table className="w-full min-w-[720px] text-left text-xs">
+                      <thead className="bg-[#11141d] text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800 whitespace-nowrap">
                         <tr>
                           <th className="p-3">Giocatore</th>
                           <th className="p-3">Iscritto</th>
@@ -598,20 +986,20 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                       <tbody className="divide-y divide-slate-800/60">
                         {athletes.map((athlete) => {
                           const isRegistered = selectedTraining.registeredAthleteIds?.includes(athlete.id);
+                          const communicatedAbsence = selectedTraining.absentAthletes?.find((ab) => ab.athleteId === athlete.id);
                           const attendee = selectedTraining.attendees?.find((a) => a.athleteId === athlete.id);
-                          const currentStatus = attendee?.status || (isRegistered ? 'iscritto' : 'non_iscritto');
 
                           return (
                             <tr key={athlete.id} className="hover:bg-[#161b26] transition-colors">
-                              <td className="p-3">
+                              <td className="p-3 whitespace-nowrap">
                                 <div className="flex items-center gap-2">
-                                  <span className="w-6 h-6 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-slate-800">
+                                  <span className="w-6 h-6 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-slate-800 shrink-0">
                                     #{athlete.jerseyNumber}
                                   </span>
                                   <img
                                     src={athlete.photoUrl || 'https://images.unsplash.com/photo-1500648767791-00dcc994a43e?auto=format&fit=crop&w=100&q=80'}
                                     alt={athlete.lastName}
-                                    className="w-7 h-7 rounded-md object-cover"
+                                    className="w-7 h-7 rounded-md object-cover shrink-0"
                                   />
                                   <div>
                                     <span className="font-bold text-white block">
@@ -622,13 +1010,29 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                                 </div>
                               </td>
 
-                              <td className="p-3">
+                              <td className="p-3 whitespace-nowrap">
                                 {isRegistered ? (
                                   <span className="px-2 py-0.5 text-[10px] font-bold bg-cyan-500/20 text-cyan-300 rounded border border-cyan-500/30">
                                     Iscritto
                                   </span>
+                                ) : communicatedAbsence ? (
+                                  <div className="space-y-0.5">
+                                    <span
+                                      className="inline-block px-2 py-0.5 text-[10px] font-bold bg-rose-500/20 text-rose-300 rounded border border-rose-500/30"
+                                      title={communicatedAbsence.reason || 'Assenza comunicata'}
+                                    >
+                                      Assenza comunicata
+                                    </span>
+                                    {communicatedAbsence.reason && (
+                                      <span className="block text-[10px] text-slate-400 italic truncate max-w-[140px]">
+                                        {communicatedAbsence.reason}
+                                      </span>
+                                    )}
+                                  </div>
                                 ) : (
-                                  <span className="text-slate-500 text-[10px]">No</span>
+                                  <span className="px-2 py-0.5 text-[10px] font-medium bg-amber-500/10 text-amber-300/90 rounded border border-amber-500/20">
+                                    In attesa risposta
+                                  </span>
                                 )}
                               </td>
 
@@ -727,63 +1131,179 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                   </div>
 
                   <div className="space-y-3">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                      Sequenza Drills & Esercizi
-                    </h4>
-                    {selectedTraining.drills?.map((drill, index) => (
-                      <div
-                        key={drill.id}
-                        className="p-4 bg-[#0b0e14] rounded-2xl border border-slate-800 flex items-start gap-3"
-                      >
-                        <span className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
-                          {index + 1}
-                        </span>
-                        <div className="flex-1">
-                          <div className="flex items-center justify-between">
-                            <h5 className="text-sm font-bold text-white">{drill.name}</h5>
-                            <span className="px-2 py-0.5 text-[10px] font-bold bg-[#11141d] text-slate-300 rounded border border-slate-700">
-                              {drill.durationMinutes} minuti
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                          Sequenza Drills & Esercizi
+                        </h4>
+                        {(() => {
+                          const totalSessionDuration = calculateDurationMinutes(selectedTraining.startTime, selectedTraining.endTime);
+                          const totalDrillsMinutes = selectedTraining.drills?.reduce((acc, d) => acc + (d.durationMinutes || 0), 0) || 0;
+                          return (
+                            <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                              {totalDrillsMinutes} / {totalSessionDuration} min totali
                             </span>
-                          </div>
-                          <p className="text-xs text-slate-300 mt-1">{drill.description}</p>
-                        </div>
+                          );
+                        })()}
                       </div>
-                    ))}
+                    </div>
+
+                    {selectedTraining.drills && selectedTraining.drills.length > 0 ? (
+                      selectedTraining.drills.map((drill, index) => (
+                        <div
+                          key={drill.id || index}
+                          className="p-4 bg-[#0b0e14] rounded-2xl border border-slate-800 flex items-start gap-3"
+                        >
+                          <span className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 font-bold text-xs flex items-center justify-center shrink-0">
+                            {index + 1}
+                          </span>
+                          <div className="flex-1">
+                            <div className="flex items-center justify-between">
+                              <h5 className="text-sm font-bold text-white">{drill.name}</h5>
+                              <span className="px-2 py-0.5 text-[10px] font-bold bg-[#11141d] text-amber-400 rounded border border-slate-700">
+                                {drill.durationMinutes} min
+                              </span>
+                            </div>
+                            {drill.description && (
+                              <p className="text-xs text-slate-300 mt-1">{drill.description}</p>
+                            )}
+                          </div>
+                        </div>
+                      ))
+                    ) : (
+                      <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+                        Nessun esercizio presente in questa seduta.
+                      </div>
+                    )}
                   </div>
                 </div>
               )}
 
-              {/* TAB: REGISTERED ATHLETES */}
+              {/* TAB: REGISTERED ATHLETES & COMMUNICATED ABSENCES */}
               {activeTabModal === 'details' && (
-                <div className="space-y-4">
-                  <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
-                    Atleti Iscritti tramite Dashboard ({selectedTraining.registeredAthleteIds?.length || 0})
-                  </h4>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                    {athletes
-                      .filter((a) => selectedTraining.registeredAthleteIds?.includes(a.id))
-                      .map((ath) => (
-                        <div
-                          key={ath.id}
-                          className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800 flex items-center gap-3"
-                        >
-                          <span className="w-7 h-7 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-slate-800">
-                            #{ath.jerseyNumber}
-                          </span>
-                          <img
-                            src={ath.photoUrl}
-                            alt={ath.lastName}
-                            className="w-8 h-8 rounded-lg object-cover"
-                          />
-                          <div>
-                            <span className="font-bold text-white text-xs block truncate">
-                              {ath.firstName} {ath.lastName}
-                            </span>
-                            <span className="text-[10px] text-slate-400">{ath.role}</span>
-                          </div>
-                        </div>
-                      ))}
+                <div className="space-y-6">
+                  <div className="space-y-3">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-slate-400">
+                      Atleti Iscritti tramite Dashboard ({selectedTraining.registeredAthleteIds?.length || 0})
+                    </h4>
+                    {(selectedTraining.registeredAthleteIds?.length || 0) === 0 ? (
+                      <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+                        Nessun atleta iscritto al momento.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                        {athletes
+                          .filter((a) => selectedTraining.registeredAthleteIds?.includes(a.id))
+                          .map((ath) => (
+                            <div
+                              key={ath.id}
+                              className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800 flex items-center gap-3"
+                            >
+                              <span className="w-7 h-7 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-slate-800">
+                                #{ath.jerseyNumber}
+                              </span>
+                              <img
+                                src={ath.photoUrl}
+                                alt={ath.lastName}
+                                className="w-8 h-8 rounded-lg object-cover"
+                              />
+                              <div>
+                                <span className="font-bold text-white text-xs block truncate">
+                                  {ath.firstName} {ath.lastName}
+                                </span>
+                                <span className="text-[10px] text-slate-400">{ath.role}</span>
+                              </div>
+                            </div>
+                          ))}
+                      </div>
+                    )}
                   </div>
+
+                  <div className="space-y-3 pt-4 border-t border-slate-800">
+                    <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400">
+                      Assenze Comunicate dagli Atleti ({selectedTraining.absentAthletes?.length || 0})
+                    </h4>
+                    {(selectedTraining.absentAthletes?.length || 0) === 0 ? (
+                      <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+                        Nessuna assenza comunicata per questa sessione.
+                      </div>
+                    ) : (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {(selectedTraining.absentAthletes || []).map((ab) => {
+                          const ath = athletes.find((a) => a.id === ab.athleteId);
+                          if (!ath) return null;
+                          return (
+                            <div
+                              key={ath.id}
+                              className="p-3 bg-[#0b0e14] rounded-xl border border-rose-500/30 flex items-start gap-3"
+                            >
+                              <span className="w-7 h-7 rounded bg-[#11141d] text-rose-400 font-bold text-xs flex items-center justify-center border border-rose-500/30 shrink-0">
+                                #{ath.jerseyNumber}
+                              </span>
+                              <img
+                                src={ath.photoUrl}
+                                alt={ath.lastName}
+                                className="w-8 h-8 rounded-lg object-cover shrink-0"
+                              />
+                              <div className="min-w-0 flex-1">
+                                <span className="font-bold text-white text-xs block truncate">
+                                  {ath.firstName} {ath.lastName}
+                                </span>
+                                <span className="text-[10px] text-slate-400 block">{ath.role}</span>
+                                {ab.reason && (
+                                  <p className="text-[11px] text-rose-300 mt-1 italic">
+                                    Motivo: {ab.reason}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+
+                  {(() => {
+                    const regIds = new Set(selectedTraining.registeredAthleteIds || []);
+                    const absIds = new Set((selectedTraining.absentAthletes || []).map((ab) => ab.athleteId));
+                    const pendingAthletes = athletes.filter((a) => !regIds.has(a.id) && !absIds.has(a.id));
+                    return (
+                      <div className="space-y-3 pt-4 border-t border-slate-800">
+                        <h4 className="text-xs font-bold uppercase tracking-wider text-amber-400">
+                          In Attesa Risposta ({pendingAthletes.length})
+                        </h4>
+                        {pendingAthletes.length === 0 ? (
+                          <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+                            Tutti gli atleti hanno già comunicato la propria disponibilità.
+                          </div>
+                        ) : (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
+                            {pendingAthletes.map((ath) => (
+                              <div
+                                key={ath.id}
+                                className="p-3 bg-[#0b0e14] rounded-xl border border-amber-500/20 flex items-center gap-3"
+                              >
+                                <span className="w-7 h-7 rounded bg-[#11141d] text-amber-400 font-bold text-xs flex items-center justify-center border border-amber-500/20 shrink-0">
+                                  #{ath.jerseyNumber}
+                                </span>
+                                <img
+                                  src={ath.photoUrl}
+                                  alt={ath.lastName}
+                                  className="w-8 h-8 rounded-lg object-cover shrink-0"
+                                />
+                                <div className="min-w-0">
+                                  <span className="font-bold text-white text-xs block truncate">
+                                    {ath.firstName} {ath.lastName}
+                                  </span>
+                                  <span className="text-[10px] text-slate-400">{ath.role}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -791,126 +1311,359 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
         </div>
       )}
 
-      {/* Add New Training Modal */}
-      {showAddModal && (
-        <div
-          className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
-          onClick={() => setShowAddModal(false)}
-        >
+      {/* Create / Edit Training Modal */}
+      {isFormModalOpen && (() => {
+        const sessionDuration = calculateDurationMinutes(formData.startTime, formData.endTime);
+        const drillsTotalMinutes = formData.drills.reduce((sum, d) => sum + (Number(d.durationMinutes) || 0), 0);
+        const remainingMinutes = sessionDuration - drillsTotalMinutes;
+        const isSaturated = sessionDuration > 0 && drillsTotalMinutes === sessionDuration;
+
+        return (
           <div
-            id="add-training-modal"
-            className="bg-[#11141d] border border-slate-800 rounded-3xl w-full max-w-2xl p-6 shadow-2xl space-y-4"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200"
+            onClick={() => setIsFormModalOpen(false)}
           >
-            <div className="flex items-center justify-between pb-3 border-b border-slate-800">
-              <h2 className="text-lg font-bold text-white flex items-center gap-2">
-                <Plus className="w-5 h-5 text-amber-400" />
-                Pianifica Sessione di Allenamento
-              </h2>
-            </div>
-
-            <form onSubmit={handleCreateTrainingSubmit} className="space-y-4 text-xs">
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 mb-1 font-medium">Titolo Sessione *</label>
-                  <input
-                    type="text"
-                    required
-                    placeholder="es. Fase Ricezione-Punto & Transizione Attacco"
-                    value={newTraining.title}
-                    onChange={(e) => setNewTraining({ ...newTraining, title: e.target.value })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
-                  />
+            <div
+              id="training-form-modal"
+              className="bg-[#11141d] border border-slate-800 rounded-3xl w-full max-w-3xl max-h-[92vh] flex flex-col shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between p-6 pb-4 border-b border-slate-800 shrink-0">
+                <div className="flex items-center gap-2.5">
+                  <div className="w-9 h-9 rounded-xl bg-amber-500/20 text-amber-400 flex items-center justify-center">
+                    {editingTrainingId ? <Edit2 className="w-5 h-5" /> : <Plus className="w-5 h-5" />}
+                  </div>
+                  <div>
+                    <h2 className="text-lg font-bold text-white font-display">
+                      {editingTrainingId ? 'Modifica Sessione di Allenamento' : 'Pianifica Sessione di Allenamento'}
+                    </h2>
+                  </div>
                 </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Data *</label>
-                  <input
-                    type="date"
-                    required
-                    value={newTraining.date}
-                    onChange={(e) => setNewTraining({ ...newTraining, date: e.target.value })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Focus Tecnico *</label>
-                  <select
-                    value={newTraining.primaryFocus}
-                    onChange={(e) => setNewTraining({ ...newTraining, primaryFocus: e.target.value as any })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
-                  >
-                    <option value="Ricezione/Attacco">Ricezione / Attacco</option>
-                    <option value="Fase Break & Muro">Fase Break & Muro</option>
-                    <option value="Palleggio & Schemi">Palleggio & Schemi</option>
-                    <option value="Potenziamento Fisico">Potenziamento Fisico</option>
-                    <option value="Partitella & Tattica">Partitella & Tattica</option>
-                    <option value="Battuta & Ricezione">Battuta & Ricezione</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Orario Inizio</label>
-                  <input
-                    type="time"
-                    value={newTraining.startTime}
-                    onChange={(e) => setNewTraining({ ...newTraining, startTime: e.target.value })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-slate-400 mb-1 font-medium">Orario Fine</label>
-                  <input
-                    type="time"
-                    value={newTraining.endTime}
-                    onChange={(e) => setNewTraining({ ...newTraining, endTime: e.target.value })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 mb-1 font-medium">Luogo / Palestra</label>
-                  <input
-                    type="text"
-                    value={newTraining.location}
-                    onChange={(e) => setNewTraining({ ...newTraining, location: e.target.value })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-
-                <div className="sm:col-span-2">
-                  <label className="block text-slate-400 mb-1 font-medium">Obiettivo Principale</label>
-                  <textarea
-                    rows={2}
-                    placeholder="Descrivi l'obiettivo tecnico/tattico della seduta..."
-                    value={newTraining.objective}
-                    onChange={(e) => setNewTraining({ ...newTraining, objective: e.target.value })}
-                    className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white"
-                  />
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-4 border-t border-slate-800">
                 <button
                   type="button"
-                  onClick={() => setShowAddModal(false)}
-                  className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white"
+                  onClick={() => setIsFormModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors cursor-pointer"
                 >
-                  Annulla
-                </button>
-                <button
-                  type="submit"
-                  className="px-5 py-2 text-xs font-bold text-slate-950 bg-amber-500 hover:bg-amber-400 rounded-xl shadow-lg shadow-amber-500/20"
-                >
-                  Salva e Pianifica
+                  <X className="w-5 h-5" />
                 </button>
               </div>
-            </form>
+
+              {/* Form Body */}
+              <form onSubmit={handleFormSubmit} className="flex-1 overflow-y-auto p-6 space-y-5 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-400 mb-1 font-medium">Titolo Sessione *</label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="es. Fase Ricezione-Punto & Transizione Attacco"
+                      value={formData.title}
+                      onChange={(e) => setFormData({ ...formData, title: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Data *</label>
+                    <input
+                      type="date"
+                      required
+                      value={formData.date}
+                      onChange={(e) => setFormData({ ...formData, date: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Focus Tecnico *</label>
+                    <select
+                      value={formData.primaryFocus}
+                      onChange={(e) => setFormData({ ...formData, primaryFocus: e.target.value as any })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="Ricezione/Attacco">Ricezione / Attacco</option>
+                      <option value="Fase Break & Muro">Fase Break & Muro</option>
+                      <option value="Palleggio & Schemi">Palleggio & Schemi</option>
+                      <option value="Potenziamento Fisico">Potenziamento Fisico</option>
+                      <option value="Partitella & Tattica">Partitella & Tattica</option>
+                      <option value="Battuta & Ricezione">Battuta & Ricezione</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Orario Inizio *</label>
+                    <input
+                      type="time"
+                      required
+                      value={formData.startTime}
+                      onChange={(e) => setFormData({ ...formData, startTime: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-slate-400 mb-1 font-medium">Orario Fine *</label>
+                    <input
+                      type="time"
+                      required
+                      value={formData.endTime}
+                      onChange={(e) => setFormData({ ...formData, endTime: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  {/* Palestra Dropdown & Free Text */}
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-400 mb-1 font-medium">Palestra *</label>
+                    <select
+                      value={formData.gymSelection}
+                      onChange={(e) => setFormData({ ...formData, gymSelection: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white focus:outline-none focus:border-amber-500"
+                    >
+                      <option value="" disabled>-- Seleziona Palestra --</option>
+                      {STANDARD_GYMS.map((gym) => (
+                        <option key={gym} value={gym}>
+                          {gym}
+                        </option>
+                      ))}
+                      <option value="altro">Altro / Fuori sede (Scrivi liberamente la palestra)</option>
+                    </select>
+
+                    {formData.gymSelection === 'altro' && (
+                      <div className="mt-2.5">
+                        <label className="block text-amber-400 text-[11px] font-semibold mb-1">
+                          Specifica Palestra Fuori Sede:
+                        </label>
+                        <input
+                          type="text"
+                          required
+                          placeholder="es. PalaDonBosco - Via San Domenico Savio, Palermo"
+                          value={formData.customGym}
+                          onChange={(e) => setFormData({ ...formData, customGym: e.target.value })}
+                          className="w-full bg-[#0b0e14] border border-amber-500/50 rounded-xl px-3 py-2 text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+                        />
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-400 mb-1 font-medium">Obiettivo Principale</label>
+                    <textarea
+                      rows={2}
+                      placeholder="Descrivi l'obiettivo tecnico/tattico della seduta..."
+                      value={formData.objective}
+                      onChange={(e) => setFormData({ ...formData, objective: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+
+                  <div className="sm:col-span-2">
+                    <label className="block text-slate-400 mb-1 font-medium">Note</label>
+                    <input
+                      type="text"
+                      placeholder="es. Portare scarpe pulite e protezioni"
+                      value={formData.coachNotes}
+                      onChange={(e) => setFormData({ ...formData, coachNotes: e.target.value })}
+                      className="w-full bg-[#0b0e14] border border-slate-800 rounded-xl px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:border-amber-500"
+                    />
+                  </div>
+                </div>
+
+                {/* ESERCIZI A SATURAZIONE DURATA */}
+                <div className="pt-4 border-t border-slate-800 space-y-3">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-[#0b0e14] p-3.5 rounded-2xl border border-slate-800">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-white">
+                        SCHEDA ESERCIZI
+                      </span>
+                      <span
+                        className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                          isSaturated
+                            ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                            : remainingMinutes > 0
+                            ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                            : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                        }`}
+                      >
+                        {isSaturated
+                          ? `✓ Durata Saturata (${drillsTotalMinutes}/${sessionDuration} min)`
+                          : remainingMinutes > 0
+                          ? `Mancano ${remainingMinutes} min (${drillsTotalMinutes}/${sessionDuration} min)`
+                          : `Superata di ${Math.abs(remainingMinutes)} min (${drillsTotalMinutes}/${sessionDuration} min)`}
+                      </span>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      {formData.drills.length > 0 && remainingMinutes !== 0 && sessionDuration > 0 && (
+                        <button
+                          type="button"
+                          onClick={handleAutoFitRemaining}
+                          className="px-2.5 py-1.5 text-[11px] font-bold bg-amber-500/10 hover:bg-amber-500/20 text-amber-400 border border-amber-500/30 rounded-xl transition-colors cursor-pointer"
+                          title="Regola automaticamente la durata dell'ultimo esercizio per saturare la sessione"
+                        >
+                          Adatta ultimo a {sessionDuration}m
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleAddDrill}
+                        className="px-3 py-1.5 text-xs font-bold bg-slate-800 hover:bg-slate-700 text-white rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                      >
+                        <Plus className="w-3.5 h-3.5 text-amber-400" />
+                        Nuovo Esercizio
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Elenco Esercizi (senza doppio scroll) */}
+                  <div className="space-y-2.5">
+                    {formData.drills.map((drill, index) => (
+                      <div
+                        key={drill.id || index}
+                        className="p-3 bg-[#0b0e14] rounded-2xl border border-slate-800 space-y-2 group hover:border-slate-700 transition-colors"
+                      >
+                        <div className="flex items-center gap-2">
+                          <span className="w-6 h-6 rounded-lg bg-amber-500/20 text-amber-400 text-xs font-bold flex items-center justify-center shrink-0">
+                            {index + 1}
+                          </span>
+                          <input
+                            type="text"
+                            required
+                            placeholder="Nome esercizio (es. Correlazione Muro - Difesa)"
+                            value={drill.name}
+                            onChange={(e) => handleUpdateDrill(index, 'name', e.target.value)}
+                            className="flex-1 bg-[#11141d] border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white focus:outline-none focus:border-amber-500"
+                          />
+                          <div className="flex items-center gap-1 shrink-0">
+                            <input
+                              type="number"
+                              min="1"
+                              required
+                              placeholder="Min"
+                              value={drill.durationMinutes === 0 ? '' : drill.durationMinutes}
+                              onChange={(e) => handleUpdateDrill(index, 'durationMinutes', e.target.value)}
+                              className="w-18 bg-[#11141d] border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-center text-amber-400 font-bold focus:outline-none focus:border-amber-500"
+                            />
+                            <span className="text-[11px] text-slate-400 font-medium">min</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => handleRemoveDrill(index)}
+                            className="p-1.5 text-slate-500 hover:text-rose-400 hover:bg-rose-950/20 rounded-lg transition-colors cursor-pointer"
+                            title="Rimuovi esercizio"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+
+                        <input
+                          type="text"
+                          placeholder="Dettagli / indicazioni operative dell'esercizio (es. rotazioni vincolate, target sui 3 metri)"
+                          value={drill.description || ''}
+                          onChange={(e) => handleUpdateDrill(index, 'description', e.target.value)}
+                          className="w-full bg-[#11141d] border border-slate-800/80 rounded-xl px-2.5 py-1 text-[11px] text-slate-300 placeholder-slate-600 focus:outline-none focus:border-slate-700"
+                        />
+                      </div>
+                    ))}
+
+                    {/* Tasto nuovo esercizio sotto l'ultimo esercizio con conteggio minuti */}
+                    {formData.drills.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={handleAddDrill}
+                        className="w-full py-2.5 px-4 text-xs font-bold bg-[#161b26] hover:bg-slate-800 text-amber-400 hover:text-amber-300 border border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl flex items-center justify-between transition-all cursor-pointer group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Plus className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                          <span>Nuovo Esercizio</span>
+                        </div>
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                            isSaturated
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              : remainingMinutes > 0
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          }`}
+                        >
+                          {isSaturated
+                            ? `✓ Durata Saturata (${drillsTotalMinutes}/${sessionDuration} min)`
+                            : remainingMinutes > 0
+                            ? `Mancano ${remainingMinutes} min (${drillsTotalMinutes}/${sessionDuration} min)`
+                            : `Superata di ${Math.abs(remainingMinutes)} min (${drillsTotalMinutes}/${sessionDuration} min)`}
+                        </span>
+                      </button>
+                    )}
+
+                    {formData.drills.length === 0 && (
+                      <button
+                        type="button"
+                        onClick={handleAddDrill}
+                        className="w-full p-3.5 px-4 border border-dashed border-slate-800 hover:border-amber-500/40 rounded-2xl text-slate-400 hover:text-amber-400 text-xs flex flex-col sm:flex-row items-center justify-between gap-2 transition-colors cursor-pointer bg-[#0b0e14]/50 group"
+                      >
+                        <div className="flex items-center gap-2">
+                          <Plus className="w-4 h-4 text-amber-400 group-hover:scale-110 transition-transform" />
+                          <span>Nessun esercizio inserito. Clicca per aggiungere il primo esercizio.</span>
+                        </div>
+                        <span
+                          className={`text-[11px] font-bold px-2 py-0.5 rounded-md border ${
+                            isSaturated
+                              ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
+                              : remainingMinutes > 0
+                              ? 'bg-amber-500/20 text-amber-300 border-amber-500/30'
+                              : 'bg-rose-500/20 text-rose-300 border-rose-500/30'
+                          }`}
+                        >
+                          {isSaturated
+                            ? `✓ Durata Saturata (${drillsTotalMinutes}/${sessionDuration} min)`
+                            : remainingMinutes > 0
+                            ? `Mancano ${remainingMinutes} min (${drillsTotalMinutes}/${sessionDuration} min)`
+                            : `Superata di ${Math.abs(remainingMinutes)} min (${drillsTotalMinutes}/${sessionDuration} min)`}
+                        </span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+
+                {/* Footer / Submit */}
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-slate-800 shrink-0">
+                  <div className="text-xs">
+                    {!isSaturated && sessionDuration > 0 && (
+                      <span className="text-rose-400 font-medium flex items-center gap-1.5">
+                        <AlertCircle className="w-4 h-4 shrink-0" />
+                        {remainingMinutes > 0
+                          ? `Aggiungi ancora ${remainingMinutes} minuti di esercizi per saturare la seduta`
+                          : `Riduci ${Math.abs(remainingMinutes)} minuti di esercizi per saturare la seduta`}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 w-full sm:w-auto justify-end">
+                    <button
+                      type="button"
+                      onClick={() => setIsFormModalOpen(false)}
+                      className="px-4 py-2 text-xs font-semibold text-slate-400 hover:text-white transition-colors"
+                    >
+                      Annulla
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={!isSaturated}
+                      className={`px-5 py-2.5 text-xs font-bold rounded-xl shadow-lg transition-all ${
+                        isSaturated
+                          ? 'text-slate-950 bg-gradient-to-r from-amber-500 to-orange-500 hover:from-amber-400 hover:to-orange-400 shadow-amber-500/20 cursor-pointer'
+                          : 'text-slate-500 bg-slate-800 cursor-not-allowed opacity-60'
+                      }`}
+                    >
+                      {editingTrainingId ? 'Salva Modifiche' : 'Salva e Pianifica'}
+                    </button>
+                  </div>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 };

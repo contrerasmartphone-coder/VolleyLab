@@ -3,6 +3,7 @@ import { Athlete } from '../../types';
 import { Shield, Activity, AlertCircle, CheckCircle2, ChevronRight, Zap, Award, Edit2, Trash2 } from 'lucide-react';
 import { getWhatsAppLink } from '../../lib/athleteValidation';
 import { WhatsAppIcon } from '../common/WhatsAppIcon';
+import { useAuth } from '../../context/AuthContext';
 
 interface AthleteCardProps {
   athlete: Athlete;
@@ -31,9 +32,11 @@ export const getRoleColor = (role: string) => {
 export const AthleteCard: React.FC<AthleteCardProps> = ({
   athlete,
   onSelect,
-  isCoach,
+  isCoach: isCoachProp,
   onDelete,
 }) => {
+  const { isStaff } = useAuth();
+  const isCoach = isCoachProp || isStaff;
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -119,7 +122,9 @@ export const AthleteCard: React.FC<AthleteCardProps> = ({
             </h3>
             <div className="flex items-center gap-2 mt-1">
               <span className="text-[11px] text-slate-400 font-medium">
-                {athlete.heightCm} cm • {athlete.weightKg} kg
+                {athlete.heightCm || athlete.weightKg
+                  ? `${athlete.heightCm ? `${athlete.heightCm} cm` : 'H: N/D'} • ${athlete.weightKg ? `${athlete.weightKg} kg` : 'P: N/D'}`
+                  : 'Fisico: N/D'}
               </span>
             </div>
           </div>
