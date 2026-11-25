@@ -26,12 +26,17 @@ import {
   X,
 } from 'lucide-react';
 import { useDialog } from '../../context/DialogContext';
+import {
+  updateMatchScoutSetAtomic,
+  setMatchScoutPublishedAtomic,
+} from '../../lib/db';
 
 interface MatchScoutPanelProps {
   match: MatchEvent;
   athletes: Athlete[];
   canManage: boolean;
   onSaveMatch: (updatedMatch: MatchEvent) => Promise<void>;
+  onSyncMatchState?: (updatedMatch: MatchEvent) => void;
 }
 
 const ZONES_COUNTER_CLOCKWISE: CourtZone[] = ['1', '2', '3', '4', '5', '6'];
@@ -159,6 +164,7 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
   athletes,
   canManage,
   onSaveMatch,
+  onSyncMatchState,
 }) => {
   const { confirm, showToast } = useDialog();
 
@@ -271,38 +277,27 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
   const saveSetUpdate = async (
     setNumber: 1 | 2 | 3 | 4 | 5,
     updater: (prev: MatchScoutSet) => MatchScoutSet
-  ) => {
-    const existingSets = [...(match.scoutSets || [])];
-    const idx = existingSets.findIndex((s) => s.setNumber === setNumber);
-    const baseSet: MatchScoutSet =
-      idx >= 0
-        ? {
-            setNumber: existingSets[idx].setNumber,
-            lineup: existingSets[idx].lineup || {},
-            liberoIds: existingSets[idx].liberoIds || [],
-            substitutions: existingSets[idx].substitutions || [],
-            events: existingSets[idx].events || [],
-          }
-        : {
-            setNumber,
-            lineup: {},
-            liberoIds: defaultLiberoIds,
-            substitutions: [],
-            events: [],
-          };
-
-    const nextSet = updater(baseSet);
-    if (idx >= 0) {
-      existingSets[idx] = nextSet;
-    } else {
-      existingSets.push(nextSet);
+  ): Promise<boolean> => {
+    try {
+      const updated = await updateMatchScoutSetAtomic(
+        match.id,
+        setNumber,
+        updater,
+        defaultLiberoIds
+      );
+      if (onSyncMatchState) {
+        onSyncMatchState(updated);
+      } else {
+        await onSaveMatch(updated);
+      }
+      return true;
+    } catch {
+      showToast({
+        message: 'Errore di salvataggio dello scout nel database. Riprova.',
+        type: 'error',
+      });
+      return false;
     }
-    existingSets.sort((a, b) => a.setNumber - b.setNumber);
-
-    await onSaveMatch({
-      ...match,
-      scoutSets: existingSets,
-    });
   };
 
   // Lineup position update (P1 -> P6)
@@ -342,7 +337,7 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
       (s) => s.setNumber === activeSetNumber - 1
     );
     if (!prevSet) return;
-    await saveSetUpdate(activeSetNumber, (prev) => ({
+    const ok = await saveSetUpdate(activeSetNumber, (prev) => ({
       ...prev,
       lineup: { ...(prevSet.lineup || {}) },
       liberoIds:
@@ -350,10 +345,12 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
           ? [...prevSet.liberoIds]
           : prev.liberoIds,
     }));
-    showToast({
-      message: `Formazione iniziale copiata dal Set ${activeSetNumber - 1}`,
-      type: 'success',
-    });
+    if (ok) {
+      showToast({
+        message: `Formazione iniziale copiata dal Set ${activeSetNumber - 1}`,
+        type: 'success',
+      });
+    }
   };
 
   // Register substitution
@@ -385,10 +382,11 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
       timestamp: new Date().toISOString(),
     };
 
-    await saveSetUpdate(activeSetNumber, (prev) => ({
+    const ok = await saveSetUpdate(activeSetNumber, (prev) => ({
       ...prev,
       substitutions: [...prev.substitutions, newSub],
     }));
+    if (!ok) return;
 
     setSubOutAthleteId('');
     setSubInAthleteId('');
@@ -414,11 +412,13 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
     });
     if (!confirmed) return;
 
-    await saveSetUpdate(activeSetNumber, (prev) => ({
+    const ok = await saveSetUpdate(activeSetNumber, (prev) => ({
       ...prev,
       substitutions: prev.substitutions.filter((s) => s.id !== subId),
     }));
-    showToast({ message: 'Cambio rimosso e sestetto aggiornato', type: 'info' });
+    if (ok) {
+      showToast({ message: 'Cambio rimosso e sestetto aggiornato', type: 'info' });
+    }
   };
 
   // Record 1-tap Scout Rating
@@ -436,10 +436,11 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
       timestamp: new Date().toISOString(),
     };
 
-    await saveSetUpdate(activeSetNumber, (prev) => ({
+    const ok = await saveSetUpdate(activeSetNumber, (prev) => ({
       ...prev,
       events: [...prev.events, newEvent],
     }));
+    if (!ok) return;
 
     showToast({
       message: `#${athlete.jerseyNumber} ${athlete.lastName} • ${SKILL_LABELS[skill]}: ${rating}`,
@@ -456,10 +457,11 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
     const lastEv = currentSetData.events[currentSetData.events.length - 1];
     const ath = athletes.find((a) => a.id === lastEv.athleteId);
 
-    await saveSetUpdate(activeSetNumber, (prev) => ({
+    const ok = await saveSetUpdate(activeSetNumber, (prev) => ({
       ...prev,
       events: prev.events.slice(0, -1),
     }));
+    if (!ok) return;
 
     showToast({
       message: `Annullato ultimo tocco: #${ath?.jerseyNumber ?? ''} ${ath?.lastName ?? ''} (${SKILL_LABELS[lastEv.skill]} ${lastEv.rating})`,
@@ -478,14 +480,16 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
     });
     if (!confirmed) return;
 
-    await saveSetUpdate(activeSetNumber, () => ({
+    const ok = await saveSetUpdate(activeSetNumber, () => ({
       setNumber: activeSetNumber,
       lineup: {},
       liberoIds: defaultLiberoIds,
       substitutions: [],
       events: [],
     }));
-    showToast({ message: `Scout Set ${activeSetNumber} azzerato`, type: 'info' });
+    if (ok) {
+      showToast({ message: `Scout Set ${activeSetNumber} azzerato`, type: 'info' });
+    }
   };
 
   // Events in scope for stats table
@@ -552,15 +556,23 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
       });
       if (!confirmed) return;
 
-      await onSaveMatch({
-        ...match,
-        scoutPublishedToAthletes: true,
-        scoutPublishedAt: new Date().toISOString(),
-      });
-      showToast({
-        message: 'Raccolta dati scout pubblicata! Ora è visibile agli atleti.',
-        type: 'success',
-      });
+      try {
+        const updated = await setMatchScoutPublishedAtomic(match.id, true);
+        if (onSyncMatchState) {
+          onSyncMatchState(updated);
+        } else {
+          await onSaveMatch(updated);
+        }
+        showToast({
+          message: 'Raccolta dati scout pubblicata! Ora è visibile agli atleti.',
+          type: 'success',
+        });
+      } catch {
+        showToast({
+          message: 'Errore nella pubblicazione dello scout su Firestore.',
+          type: 'error',
+        });
+      }
     } else {
       const confirmed = await confirm({
         title: 'Nascondi Dati Scout agli Atleti',
@@ -572,14 +584,23 @@ export const MatchScoutPanel: React.FC<MatchScoutPanelProps> = ({
       });
       if (!confirmed) return;
 
-      await onSaveMatch({
-        ...match,
-        scoutPublishedToAthletes: false,
-      });
-      showToast({
-        message: 'Dati scout impostati come privati per il solo staff.',
-        type: 'info',
-      });
+      try {
+        const updated = await setMatchScoutPublishedAtomic(match.id, false);
+        if (onSyncMatchState) {
+          onSyncMatchState(updated);
+        } else {
+          await onSaveMatch(updated);
+        }
+        showToast({
+          message: 'Dati scout impostati come privati per il solo staff.',
+          type: 'info',
+        });
+      } catch {
+        showToast({
+          message: 'Errore durante l\'aggiornamento dello stato di pubblicazione su Firestore.',
+          type: 'error',
+        });
+      }
     }
   };
 

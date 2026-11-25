@@ -1,6 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import { MatchEvent, MatchCallUp, Athlete, User } from '../../types';
-import { formatDate } from '../../lib/db';
+import { formatDate, confirmMatchCallUpAtomic, mutateMatchEventAtomic } from '../../lib/db';
 import {
   Calendar,
   Clock,
@@ -31,6 +31,7 @@ interface MatchCalendarProps {
   athletes: Athlete[];
   currentUser: User | null;
   onSaveMatch: (match: MatchEvent) => Promise<void>;
+  onSyncMatchState?: (match: MatchEvent) => void;
   onDeleteMatch?: (matchId: string) => Promise<void>;
   isCoach: boolean;
 }
@@ -40,6 +41,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
   athletes,
   currentUser,
   onSaveMatch,
+  onSyncMatchState,
   onDeleteMatch,
   isCoach,
 }) => {
@@ -83,7 +85,7 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
     return true;
   });
 
-  // Handle athlete confirming attendance to call-up
+  // Handle athlete confirming attendance to call-up atomically
   const handleConfirmCallUp = async (
     match: MatchEvent,
     confirmed: 'confermato' | 'non_disponibile',
@@ -91,120 +93,128 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
   ) => {
     if (!currentAthleteId) return;
 
-    const currentCallUps = [...(match.convocati || [])];
-    const existingIdx = currentCallUps.findIndex((c) => c.athleteId === currentAthleteId);
+    try {
+      const updatedMatch = await confirmMatchCallUpAtomic(
+        match.id,
+        currentAthleteId,
+        confirmed,
+        responseNote
+      );
+      onSyncMatchState?.(updatedMatch);
+      if (selectedMatch?.id === match.id) {
+        setSelectedMatch(updatedMatch);
+      }
 
-    if (existingIdx >= 0) {
-      currentCallUps[existingIdx] = {
-        ...currentCallUps[existingIdx],
-        confirmed,
-        responseNote: responseNote || currentCallUps[existingIdx].responseNote,
-        respondedAt: new Date().toISOString(),
-      };
-    } else {
-      currentCallUps.push({
-        athleteId: currentAthleteId,
-        roleInMatch: 'Panchina',
-        confirmed,
-        responseNote,
-        respondedAt: new Date().toISOString(),
+      if (confirmed === 'confermato') {
+        showToast({
+          message: `Presenza alla gara contro ${match.opponent} confermata!`,
+          type: 'success',
+        });
+      } else {
+        showToast({
+          message: `Indisponibilità per la gara contro ${match.opponent} salvata`,
+          type: 'warning',
+        });
+      }
+    } catch {
+      showToast({
+        message: 'Errore di salvataggio nel database. Verifica la connessione e riprova.',
+        type: 'error',
       });
     }
+  };
 
-    const updatedMatch: MatchEvent = {
-      ...match,
-      convocati: currentCallUps,
-    };
+  // Handle Coach modifying Call Up list atomically
+  const handleToggleAthleteCallUp = async (athleteId: string, roleInMatch: MatchCallUp['roleInMatch'] = 'Titolare') => {
+    if (!activeSelectedMatch) return;
 
-    await onSaveMatch(updatedMatch);
-    if (selectedMatch?.id === match.id) {
+    try {
+      const updatedMatch = await mutateMatchEventAtomic(activeSelectedMatch.id, (latest) => {
+        const currentCallUps = [...(latest.convocati || [])];
+        const existingIdx = currentCallUps.findIndex((c) => c.athleteId === athleteId);
+        if (existingIdx >= 0) {
+          return { convocati: currentCallUps.filter((c) => c.athleteId !== athleteId) };
+        }
+        currentCallUps.push({
+          athleteId,
+          roleInMatch,
+          confirmed: 'in_attesa',
+        });
+        return { convocati: currentCallUps };
+      });
+      onSyncMatchState?.(updatedMatch);
       setSelectedMatch(updatedMatch);
-    }
-
-    if (confirmed === 'confermato') {
+    } catch {
       showToast({
-        message: `Presenza alla gara contro ${match.opponent} confermata!`,
+        message: 'Errore nel salvataggio della convocazione su Firestore.',
+        type: 'error',
+      });
+    }
+  };
+
+  // Handle Coach changing athlete's role in match atomically
+  const handleChangeRoleInMatch = async (athleteId: string, roleInMatch: MatchCallUp['roleInMatch']) => {
+    if (!activeSelectedMatch) return;
+
+    try {
+      const updatedMatch = await mutateMatchEventAtomic(activeSelectedMatch.id, (latest) => ({
+        convocati: (latest.convocati || []).map((c) =>
+          c.athleteId === athleteId ? { ...c, roleInMatch } : c
+        ),
+      }));
+      onSyncMatchState?.(updatedMatch);
+      setSelectedMatch(updatedMatch);
+    } catch {
+      showToast({
+        message: 'Errore nel salvataggio del ruolo partita.',
+        type: 'error',
+      });
+    }
+  };
+
+  // Handle Coach Publishing Call-ups atomically
+  const handlePublishCallUps = async () => {
+    if (!activeSelectedMatch) return;
+    try {
+      const updatedMatch = await mutateMatchEventAtomic(activeSelectedMatch.id, () => ({
+        callUpStatus: 'pubblicata' as const,
+      }));
+      onSyncMatchState?.(updatedMatch);
+      setSelectedMatch(updatedMatch);
+      showToast({
+        message: `Foglio convocazioni per la partita contro ${updatedMatch.opponent} pubblicato!`,
         type: 'success',
       });
-    } else {
+    } catch {
       showToast({
-        message: `Indisponibilità per la gara contro ${match.opponent} salvata`,
-        type: 'warning',
+        message: 'Errore nella pubblicazione delle convocazioni su Firestore.',
+        type: 'error',
       });
     }
   };
 
-  // Handle Coach modifying Call Up list
-  const handleToggleAthleteCallUp = async (athleteId: string, roleInMatch: MatchCallUp['roleInMatch'] = 'Titolare') => {
-    if (!selectedMatch) return;
-
-    const currentCallUps = [...(selectedMatch.convocati || [])];
-    const existingIdx = currentCallUps.findIndex((c) => c.athleteId === athleteId);
-
-    if (existingIdx >= 0) {
-      // Remove athlete
-      const updated = currentCallUps.filter((c) => c.athleteId !== athleteId);
-      const updatedMatch = { ...selectedMatch, convocati: updated };
-      await onSaveMatch(updatedMatch);
-      setSelectedMatch(updatedMatch);
-    } else {
-      // Add athlete
-      currentCallUps.push({
-        athleteId,
-        roleInMatch,
-        confirmed: 'in_attesa',
-      });
-      const updatedMatch = { ...selectedMatch, convocati: currentCallUps };
-      await onSaveMatch(updatedMatch);
-      setSelectedMatch(updatedMatch);
-    }
-  };
-
-  // Handle Coach changing athlete's role in match
-  const handleChangeRoleInMatch = async (athleteId: string, roleInMatch: MatchCallUp['roleInMatch']) => {
-    if (!selectedMatch) return;
-
-    const currentCallUps = selectedMatch.convocati.map((c) =>
-      c.athleteId === athleteId ? { ...c, roleInMatch } : c
-    );
-
-    const updatedMatch = { ...selectedMatch, convocati: currentCallUps };
-    await onSaveMatch(updatedMatch);
-    setSelectedMatch(updatedMatch);
-  };
-
-  // Handle Coach Publishing Call-ups
-  const handlePublishCallUps = async () => {
-    if (!selectedMatch) return;
-    const updatedMatch: MatchEvent = {
-      ...selectedMatch,
-      callUpStatus: 'pubblicata',
-    };
-    await onSaveMatch(updatedMatch);
-    setSelectedMatch(updatedMatch);
-    showToast({
-      message: `Foglio convocazioni per la partita contro ${selectedMatch.opponent} pubblicato!`,
-      type: 'success',
-    });
-  };
-
-  // Handle Match Score Saving
+  // Handle Match Score Saving atomically
   const handleSaveScore = async (e: React.FormEvent, scoreData: MatchEvent['score']) => {
     e.preventDefault();
-    if (!selectedMatch) return;
+    if (!activeSelectedMatch) return;
 
-    const updatedMatch: MatchEvent = {
-      ...selectedMatch,
-      callUpStatus: 'conclusa',
-      score: scoreData,
-    };
-
-    await onSaveMatch(updatedMatch);
-    setSelectedMatch(updatedMatch);
-    showToast({
-      message: `Risultato e tabellino partita salvati con successo!`,
-      type: 'success',
-    });
+    try {
+      const updatedMatch = await mutateMatchEventAtomic(activeSelectedMatch.id, () => ({
+        callUpStatus: 'conclusa' as const,
+        score: scoreData,
+      }));
+      onSyncMatchState?.(updatedMatch);
+      setSelectedMatch(updatedMatch);
+      showToast({
+        message: `Risultato e tabellino partita salvati con successo!`,
+        type: 'success',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nel salvataggio del risultato su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Create Match Submit
@@ -227,19 +237,26 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
       convocati: [],
     };
 
-    await onSaveMatch(created);
-    showToast({
-      message: `Nuova partita contro ${created.opponent} aggiunta al calendario!`,
-      type: 'success',
-    });
-    setShowAddMatchModal(false);
-    setActiveTabModal('callups');
-    setSelectedMatch(created);
-    setNewMatchData((prev) => ({
-      ...prev,
-      opponent: '',
-      convocati: [],
-    }));
+    try {
+      await onSaveMatch(created);
+      showToast({
+        message: `Nuova partita contro ${created.opponent} aggiunta al calendario!`,
+        type: 'success',
+      });
+      setShowAddMatchModal(false);
+      setActiveTabModal('callups');
+      setSelectedMatch(created);
+      setNewMatchData((prev) => ({
+        ...prev,
+        opponent: '',
+        convocati: [],
+      }));
+    } catch {
+      showToast({
+        message: 'Errore nel salvataggio della partita su Firestore. Riprova.',
+        type: 'error',
+      });
+    }
   };
 
   return (
@@ -556,12 +573,19 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                         type: 'danger',
                       });
                       if (confirmed) {
-                        await onDeleteMatch(activeSelectedMatch.id);
-                        showToast({
-                          message: `Partita contro ${activeSelectedMatch.opponent} eliminata dal calendario`,
-                          type: 'info',
-                        });
-                        setSelectedMatch(null);
+                        try {
+                          await onDeleteMatch(activeSelectedMatch.id);
+                          showToast({
+                            message: `Partita contro ${activeSelectedMatch.opponent} eliminata dal calendario`,
+                            type: 'info',
+                          });
+                          setSelectedMatch(null);
+                        } catch {
+                          showToast({
+                            message: 'Errore durante l\'eliminazione della partita su Firestore.',
+                            type: 'error',
+                          });
+                        }
                       }
                     }}
                     className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl transition-colors cursor-pointer"
@@ -927,6 +951,10 @@ export const MatchCalendar: React.FC<MatchCalendarProps> = ({
                   onSaveMatch={async (updatedMatch) => {
                     setSelectedMatch(updatedMatch);
                     await onSaveMatch(updatedMatch);
+                  }}
+                  onSyncMatchState={(updatedMatch) => {
+                    setSelectedMatch(updatedMatch);
+                    onSyncMatchState?.(updatedMatch);
                   }}
                 />
               )}

@@ -305,24 +305,31 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       injuries: updatedInjuries,
     };
 
-    await onSave(updatedAthlete);
-    setFormData(updatedAthlete);
-    setShowAddInjury(false);
-    showToast({
-      message: `Infortunio "${injuryRecord.title}" registrato per ${athlete.firstName}`,
-      type: 'warning',
-    });
-    setNewInjury({
-      title: '',
-      injuryType: 'Distorsione',
-      bodyPart: 'Caviglia',
-      severity: 'moderata',
-      dateReported: new Date().toISOString().split('T')[0],
-      expectedReturnDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
-      status: 'in_cura',
-      doctorDiagnosis: '',
-      physioNotes: '',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      setShowAddInjury(false);
+      showToast({
+        message: `Infortunio "${injuryRecord.title}" registrato per ${athlete.firstName}`,
+        type: 'warning',
+      });
+      setNewInjury({
+        title: '',
+        injuryType: 'Distorsione',
+        bodyPart: 'Caviglia',
+        severity: 'moderata',
+        dateReported: new Date().toISOString().split('T')[0],
+        expectedReturnDate: new Date(Date.now() + 14 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+        status: 'in_cura',
+        doctorDiagnosis: '',
+        physioNotes: '',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nel salvataggio dell\'infortunio su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Resolve Injury
@@ -344,12 +351,19 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       injuries: updatedInjuries,
     };
 
-    await onSave(updatedAthlete);
-    setFormData(updatedAthlete);
-    showToast({
-      message: `Infortunio segnato come recuperato con successo!`,
-      type: 'success',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      showToast({
+        message: `Infortunio segnato come recuperato con successo!`,
+        type: 'success',
+      });
+    } catch {
+      showToast({
+        message: 'Errore durante l\'aggiornamento dell\'infortunio su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Add Physical Progress
@@ -378,13 +392,20 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       physicalProgress: updatedProgress,
     };
 
-    await onSave(updatedAthlete);
-    setFormData(updatedAthlete);
-    setShowAddPhysical(false);
-    showToast({
-      message: `Rilevazione fisica salvata per ${athlete.firstName} ${athlete.lastName}`,
-      type: 'success',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      setShowAddPhysical(false);
+      showToast({
+        message: `Rilevazione fisica salvata per ${athlete.firstName} ${athlete.lastName}`,
+        type: 'success',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nel salvataggio della rilevazione fisica su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Add Technical Evaluation
@@ -411,13 +432,20 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       technicalEvaluations: updatedEvals,
     };
 
-    await onSave(updatedAthlete);
-    setFormData(updatedAthlete);
-    setShowAddEval(false);
-    showToast({
-      message: `Valutazione tecnica aggiornata per ${athlete.firstName} ${athlete.lastName}`,
-      type: 'success',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      setShowAddEval(false);
+      showToast({
+        message: `Valutazione tecnica aggiornata per ${athlete.firstName} ${athlete.lastName}`,
+        type: 'success',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nel salvataggio della valutazione tecnica su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Delete Injury
@@ -439,12 +467,19 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       status: hasActiveInjuries ? 'in_recupero' : 'attivo',
       injuries: updatedInjuries,
     };
-    setFormData(updatedAthlete);
-    await onSave(updatedAthlete);
-    showToast({
-      message: 'Record infortunio eliminato con successo',
-      type: 'info',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      showToast({
+        message: 'Record infortunio eliminato con successo',
+        type: 'info',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nell\'eliminazione dell\'infortunio su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Save Injury Edit
@@ -487,14 +522,21 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       injuries: updatedInjuries,
     };
 
-    setFormData(updatedAthlete);
-    await onSave(updatedAthlete);
-    setEditingInjuryId(null);
-    setEditingInjury({});
-    showToast({
-      message: 'Infortunio modificato con successo',
-      type: 'success',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      setEditingInjuryId(null);
+      setEditingInjury({});
+      showToast({
+        message: 'Infortunio modificato con successo',
+        type: 'success',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nella modifica dell\'infortunio su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Delete Physical Progress
@@ -517,12 +559,19 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       spikeReachCm: latest ? latest.spikeReachCm : athlete.spikeReachCm,
       blockReachCm: latest ? latest.blockReachCm : athlete.blockReachCm,
     };
-    setFormData(updatedAthlete);
-    await onSave(updatedAthlete);
-    showToast({
-      message: 'Rilevazione fisica eliminata con successo',
-      type: 'info',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      showToast({
+        message: 'Rilevazione fisica eliminata con successo',
+        type: 'info',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nell\'eliminazione della rilevazione su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Handle Delete Technical Evaluation
@@ -541,12 +590,19 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       ...athlete,
       technicalEvaluations: updatedEvals,
     };
-    setFormData(updatedAthlete);
-    await onSave(updatedAthlete);
-    showToast({
-      message: 'Scheda di valutazione rimossa con successo',
-      type: 'info',
-    });
+    try {
+      await onSave(updatedAthlete);
+      setFormData(updatedAthlete);
+      showToast({
+        message: 'Scheda di valutazione rimossa con successo',
+        type: 'info',
+      });
+    } catch {
+      showToast({
+        message: 'Errore nella rimozione della valutazione su Firestore.',
+        type: 'error',
+      });
+    }
   };
 
   // Calculate Attendance Stats for this athlete
@@ -671,12 +727,19 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
                     type: 'danger',
                   });
                   if (confirmed) {
-                    await onDelete(athlete.id);
-                    showToast({
-                      message: `Atleta ${athlete.firstName} ${athlete.lastName} eliminato con successo`,
-                      type: 'info',
-                    });
-                    onClose();
+                    try {
+                      await onDelete(athlete.id);
+                      showToast({
+                        message: `Atleta ${athlete.firstName} ${athlete.lastName} eliminato con successo`,
+                        type: 'info',
+                      });
+                      onClose();
+                    } catch {
+                      showToast({
+                        message: 'Errore durante l\'eliminazione dell\'atleta da Firestore.',
+                        type: 'error',
+                      });
+                    }
                   }
                 }}
                 className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl transition-colors cursor-pointer"
@@ -2325,13 +2388,13 @@ export const AthleteDetailModal: React.FC<AthleteDetailModalProps> = ({
       isOpen={showCameraModal}
       onClose={() => setShowCameraModal(false)}
       onCapture={async (dataUrl) => {
-        setFormData((prev) => ({ ...prev, photoUrl: dataUrl }));
         try {
           await onSave({ ...athlete, photoUrl: dataUrl });
+          setFormData((prev) => ({ ...prev, photoUrl: dataUrl }));
           showToast({ message: 'Foto profilo scattata e salvata con successo!', type: 'success' });
         } catch (err) {
           console.error('Error auto-saving captured photo:', err);
-          showToast({ message: 'Foto scattata con successo!', type: 'success' });
+          showToast({ message: 'Errore nel salvataggio della foto su Firestore.', type: 'error' });
         }
       }}
     />

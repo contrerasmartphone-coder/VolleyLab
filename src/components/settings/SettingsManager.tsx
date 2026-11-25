@@ -19,8 +19,10 @@ import {
   BookmarkPlus,
   HelpCircle,
   X,
+  History,
+  User as UserIcon,
 } from 'lucide-react';
-import { Athlete, TrainingSession, MatchEvent, User } from '../../types';
+import { Athlete, TrainingSession, MatchEvent, User, RestoreHistoryEntry } from '../../types';
 import {
   createFullSystemBackup,
   restoreSystemFromBackup,
@@ -29,6 +31,8 @@ import {
   getLocalRestorePoints,
   deleteLocalRestorePoint,
   subscribeRestorePoints,
+  recordRestoreHistory,
+  subscribeRestoreHistory,
   SystemBackupPayload,
   LocalRestorePoint,
 } from '../../lib/db';
@@ -54,6 +58,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
   const { confirm, showToast } = useDialog();
 
   const [restorePoints, setRestorePoints] = useState<LocalRestorePoint[]>([]);
+  const [restoreHistory, setRestoreHistory] = useState<RestoreHistoryEntry[]>([]);
   const [newPointLabel, setNewPointLabel] = useState('');
   const [isExporting, setIsExporting] = useState(false);
   const [isSavingSnapshot, setIsSavingSnapshot] = useState(false);
@@ -65,15 +70,36 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
 
   // File import state
   const [selectedFileBackup, setSelectedFileBackup] = useState<SystemBackupPayload | null>(null);
+  const [selectedFileName, setSelectedFileName] = useState<string>('');
   const [fileError, setFileError] = useState<string | null>(null);
   const [restoreMode, setRestoreMode] = useState<'replace' | 'merge'>('replace');
 
   useEffect(() => {
-    const unsubscribe = subscribeRestorePoints((points) => {
+    const unsubscribePoints = subscribeRestorePoints((points) => {
       setRestorePoints(points);
     });
-    return () => unsubscribe();
+    const unsubscribeHistory = subscribeRestoreHistory((history) => {
+      setRestoreHistory(history);
+    });
+    return () => {
+      unsubscribePoints();
+      unsubscribeHistory();
+    };
   }, []);
+
+  const getOperatorInfo = () => {
+    const fullName =
+      [currentUser?.firstName, currentUser?.lastName].filter(Boolean).join(' ').trim() ||
+      currentUser?.name?.trim() ||
+      currentUser?.username ||
+      'Operatore Sconosciuto';
+    return {
+      userId: currentUser?.id || 'unknown',
+      username: currentUser?.username || 'sconosciuto',
+      fullName,
+      role: currentUser?.role || 'staff',
+    };
+  };
 
   // 1. Download JSON Backup (Pure export, no snapshot side-effects)
   const handleExportBackup = async () => {
@@ -157,6 +183,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
     const file = e.target.files?.[0];
     setFileError(null);
     setSelectedFileBackup(null);
+    setSelectedFileName('');
 
     if (!file) return;
 
@@ -168,6 +195,7 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
           throw new Error('Il file caricato non sembra un backup valido di VolleyLab (struttura dati mancante).');
         }
         setSelectedFileBackup(parsed as SystemBackupPayload);
+        setSelectedFileName(file.name);
       } catch (err: any) {
         setFileError(err.message || 'File JSON non valido o corrotto.');
       }
@@ -196,12 +224,25 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       setIsRestoring(true);
       const result = await restoreSystemFromBackup(selectedFileBackup.data, restoreMode);
 
+      try {
+        await recordRestoreHistory({
+          sourceType: 'json_file',
+          snapshotLabel: selectedFileName || 'File Backup (.json)',
+          mode: restoreMode,
+          performedBy: getOperatorInfo(),
+          stats: result,
+        });
+      } catch (histErr) {
+        console.warn('Could not record restore history entry:', histErr);
+      }
+
       showToast({
         message: `Ripristino completato: ${result.restoredAthletes} atleti, ${result.restoredTrainings} allenamenti, ${result.restoredMatches} partite sincronizzati su Firestore!`,
         type: 'success',
       });
 
       setSelectedFileBackup(null);
+      setSelectedFileName('');
     } catch (err) {
       console.error('Restore error:', err);
       showToast({
@@ -226,6 +267,19 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
       setIsRestoring(true);
       const resolvedData = await resolveRestorePointData(selectedSnapshotForRestore);
       const result = await restoreSystemFromBackup(resolvedData, snapshotRestoreMode);
+
+      try {
+        await recordRestoreHistory({
+          sourceType: 'cloud_snapshot',
+          snapshotId: selectedSnapshotForRestore.id,
+          snapshotLabel: selectedSnapshotForRestore.label,
+          mode: snapshotRestoreMode,
+          performedBy: getOperatorInfo(),
+          stats: result,
+        });
+      } catch (histErr) {
+        console.warn('Could not record restore history entry:', histErr);
+      }
 
       showToast({
         message: snapshotRestoreMode === 'replace'
@@ -578,6 +632,129 @@ export const SettingsManager: React.FC<SettingsManagerProps> = ({
             </div>
           </div>
         </div>
+      </div>
+
+      {/* SEZIONE 3: STORICO RIPRISTINI SNAPSHOT */}
+      <div className="bg-[#11141d] border border-slate-800 rounded-3xl p-6 shadow-xl space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center">
+              <History className="w-5 h-5" />
+            </div>
+            <div>
+              <h2 className="text-base font-bold text-white font-display">
+                Storico Ripristini Snapshot
+              </h2>
+              <p className="text-xs text-slate-400">
+                Registro cronologico permanente di tutti i ripristini eseguiti nel database, con indicazione dell'operatore
+              </p>
+            </div>
+          </div>
+
+          <span className="px-2.5 py-1 text-xs font-bold bg-indigo-500/15 text-indigo-300 border border-indigo-500/30 rounded-lg">
+            {restoreHistory.length === 1
+              ? '1 Ripristino Registrato'
+              : `${restoreHistory.length} Ripristini Registrati`}
+          </span>
+        </div>
+
+        {restoreHistory.length === 0 ? (
+          <div className="p-8 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
+            Nessun ripristino snapshot registrato finora. Ogni operazione di ripristino effettuata verrà salvata qui con data, ora e nome dell'utente.
+          </div>
+        ) : (
+          <div className="bg-[#0b0e14] rounded-2xl border border-slate-800 overflow-x-auto">
+            <table className="w-full min-w-[760px] text-left text-xs">
+              <thead className="bg-[#11141d] text-slate-400 uppercase text-[10px] font-bold border-b border-slate-800">
+                <tr>
+                  <th className="p-3.5">Data & Ora</th>
+                  <th className="p-3.5">Utente Operatore</th>
+                  <th className="p-3.5">Snapshot / File Ripristinato</th>
+                  <th className="p-3.5">Modalità</th>
+                  <th className="p-3.5">Dati Ripristinati</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-800/60">
+                {restoreHistory.map((entry) => {
+                  const dateObj = new Date(entry.timestamp);
+                  const dateFormatted = dateObj.toLocaleDateString('it-IT');
+                  const timeFormatted = dateObj.toLocaleTimeString('it-IT', {
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                  });
+
+                  return (
+                    <tr key={entry.id} className="hover:bg-[#161b26] transition-colors">
+                      <td className="p-3.5 whitespace-nowrap">
+                        <span className="font-mono font-bold text-white block">{dateFormatted}</span>
+                        <span className="font-mono text-[10px] text-slate-400">{timeFormatted}</span>
+                      </td>
+
+                      <td className="p-3.5 whitespace-nowrap">
+                        <div className="flex items-center gap-2.5">
+                          <div className="w-7 h-7 rounded-lg bg-amber-500/15 text-amber-400 border border-amber-500/30 flex items-center justify-center shrink-0">
+                            <UserIcon className="w-3.5 h-3.5" />
+                          </div>
+                          <div>
+                            <span className="font-bold text-white block">
+                              {entry.performedBy?.fullName || 'Operatore'}
+                            </span>
+                            <span className="text-[10px] text-slate-400 font-mono">
+                              @{entry.performedBy?.username || 'n/d'} •{' '}
+                              <span className="uppercase text-amber-400 font-sans font-bold">
+                                {entry.performedBy?.role || 'staff'}
+                              </span>
+                            </span>
+                          </div>
+                        </div>
+                      </td>
+
+                      <td className="p-3.5">
+                        <div className="space-y-1">
+                          <span className="font-bold text-slate-100 block">
+                            {entry.snapshotLabel}
+                          </span>
+                          <span
+                            className={`inline-block px-2 py-0.5 text-[10px] font-bold uppercase rounded border ${
+                              entry.sourceType === 'cloud_snapshot'
+                                ? 'bg-amber-500/10 text-amber-300 border-amber-500/30'
+                                : 'bg-cyan-500/10 text-cyan-300 border-cyan-500/30'
+                            }`}
+                          >
+                            {entry.sourceType === 'cloud_snapshot' ? 'Snapshot Cloud' : 'File Backup JSON'}
+                          </span>
+                        </div>
+                      </td>
+
+                      <td className="p-3.5 whitespace-nowrap">
+                        <span
+                          className={`px-2 py-0.5 text-[10px] font-bold uppercase rounded border ${
+                            entry.mode === 'replace'
+                              ? 'bg-rose-500/15 text-rose-300 border-rose-500/30'
+                              : 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30'
+                          }`}
+                        >
+                          {entry.mode === 'replace' ? 'Ripristino Esatto' : 'Unione Dati'}
+                        </span>
+                      </td>
+
+                      <td className="p-3.5 whitespace-nowrap text-[11px] text-slate-300">
+                        <span><strong>{entry.stats?.restoredAthletes ?? 0}</strong> Atleti</span>
+                        <span className="mx-1.5 text-slate-600">•</span>
+                        <span><strong>{entry.stats?.restoredTrainings ?? 0}</strong> Allenamenti</span>
+                        <span className="mx-1.5 text-slate-600">•</span>
+                        <span><strong>{entry.stats?.restoredMatches ?? 0}</strong> Partite</span>
+                        <span className="mx-1.5 text-slate-600">•</span>
+                        <span><strong>{entry.stats?.restoredUsers ?? 0}</strong> Utenti</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
 
       {/* MODALE DI CONFERMA RIPRISTINO SNAPSHOT LOCALE */}

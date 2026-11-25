@@ -7,9 +7,20 @@ import {
   deleteDoc,
   onSnapshot,
   query,
+  runTransaction,
 } from 'firebase/firestore';
 import { db } from './firebase';
-import { Athlete, TrainingSession, MatchEvent, User } from '../types';
+import {
+  Athlete,
+  TrainingSession,
+  TrainingAttendee,
+  TrainingAbsence,
+  MatchEvent,
+  MatchCallUp,
+  MatchScoutSet,
+  User,
+  RestoreHistoryEntry,
+} from '../types';
 import { INITIAL_USERS } from './mockData';
 
 const COLLECTIONS = {
@@ -18,6 +29,7 @@ const COLLECTIONS = {
   TRAININGS: 'trainings',
   MATCHES: 'matches',
   RESTORE_POINTS: 'restore_points',
+  RESTORE_HISTORY: 'restore_history',
 };
 
 // Fallback Local Storage Keys
@@ -27,6 +39,22 @@ const LS_KEYS = {
   TRAININGS: 'vm_trainings_cache',
   MATCHES: 'vm_matches_cache',
 };
+
+// Per-document async queue so rapid consecutive mutations from the same client are strictly serialized
+const docMutationQueues = new Map<string, Promise<unknown>>();
+
+function enqueueDocMutation<T>(docKey: string, task: () => Promise<T>): Promise<T> {
+  const previous = docMutationQueues.get(docKey) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(task);
+  const tail = next.catch(() => undefined);
+  docMutationQueues.set(docKey, tail);
+  tail.finally(() => {
+    if (docMutationQueues.get(docKey) === tail) {
+      docMutationQueues.delete(docKey);
+    }
+  });
+  return next;
+}
 
 // Helper for local storage backup
 function getLocal<T>(key: string, fallback: T): T {
@@ -48,23 +76,97 @@ function setLocal<T>(key: string, value: T): void {
   }
 }
 
-// ----------------- SEEDING (SAFE & NON-DESTRUCTIVE) -----------------
-export async function seedInitialDataIfEmpty(force = false): Promise<void> {
-  try {
-    const usersSnap = await getDocs(collection(db, COLLECTIONS.USERS));
-    // Provision initial base users only if the users collection is completely empty
-    if (usersSnap.empty || force) {
-      console.log('Synchronizing VolleyLab base users into empty collection...');
-      for (const u of INITIAL_USERS) {
-        await setDoc(doc(db, COLLECTIONS.USERS, u.id), u);
-      }
-      setLocal(LS_KEYS.USERS, INITIAL_USERS);
-    }
-    // Athletes, trainings, and matches are NEVER cleared or deleted on startup
-  } catch (err) {
-    console.warn('Firestore initial user check:', err);
-    if (!localStorage.getItem(LS_KEYS.USERS)) setLocal(LS_KEYS.USERS, INITIAL_USERS);
+function upsertLocalCollectionItem<T extends { id: string }>(key: string, item: T): void {
+  const current = getLocal<T[]>(key, []);
+  const idx = current.findIndex((x) => x.id === item.id);
+  if (idx >= 0) current[idx] = item;
+  else current.push(item);
+  setLocal(key, current);
+}
+
+function removeLocalCollectionItem<T extends { id: string }>(key: string, id: string): void {
+  const current = getLocal<T[]>(key, []);
+  setLocal(
+    key,
+    current.filter((x) => x.id !== id)
+  );
+}
+
+// ----------------- QUOTA & RESILIENCE HELPERS -----------------
+let isQuotaExceeded = false;
+const quotaListeners = new Set<(exceeded: boolean) => void>();
+
+export function isFirestoreQuotaError(err: unknown): boolean {
+  if (!err || typeof err !== 'object') return false;
+  const e = err as { code?: string; message?: string };
+  const msg = String(e.message || '');
+  return (
+    e.code === 'resource-exhausted' ||
+    msg.includes('Quota limit exceeded') ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('Free daily read units')
+  );
+}
+
+function notifyQuotaExceeded(): void {
+  if (!isQuotaExceeded) {
+    isQuotaExceeded = true;
+    quotaListeners.forEach((cb) => cb(true));
   }
+}
+
+export function subscribeToQuotaStatus(callback: (exceeded: boolean) => void): () => void {
+  quotaListeners.add(callback);
+  callback(isQuotaExceeded);
+  return () => {
+    quotaListeners.delete(callback);
+  };
+}
+
+// ----------------- SEEDING (SAFE & NON-DESTRUCTIVE) -----------------
+let seedPromise: Promise<void> | null = null;
+
+export async function seedInitialDataIfEmpty(force = false): Promise<void> {
+  if (!force && seedPromise) {
+    return seedPromise;
+  }
+
+  const runSeed = async () => {
+    try {
+      const cachedUsers = getLocal<User[]>(LS_KEYS.USERS, []);
+      if (!force && cachedUsers.length > 0) {
+        return;
+      }
+
+      const usersSnap = await getDocs(collection(db, COLLECTIONS.USERS));
+      // Provision initial base users only if the users collection is completely empty
+      if (usersSnap.empty || force) {
+        console.log('Synchronizing VolleyLab base users into empty collection...');
+        for (const u of INITIAL_USERS) {
+          await setDoc(doc(db, COLLECTIONS.USERS, u.id), u);
+        }
+        setLocal(LS_KEYS.USERS, INITIAL_USERS);
+      } else {
+        const list = usersSnap.docs.map((d) => d.data() as User);
+        setLocal(LS_KEYS.USERS, list);
+      }
+      // Athletes, trainings, and matches are NEVER cleared or deleted on startup
+    } catch (err) {
+      if (isFirestoreQuotaError(err)) {
+        notifyQuotaExceeded();
+        console.warn('Firestore quota exceeded during initial user check; using cached users.');
+      } else {
+        console.warn('Firestore initial user check:', err);
+      }
+      if (!localStorage.getItem(LS_KEYS.USERS)) setLocal(LS_KEYS.USERS, INITIAL_USERS);
+    }
+  };
+
+  if (!force) {
+    seedPromise = runSeed();
+    return seedPromise;
+  }
+  return runSeed();
 }
 
 // ----------------- USERS -----------------
@@ -77,28 +179,40 @@ export async function fetchUsers(): Promise<User[]> {
       return list;
     }
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      notifyQuotaExceeded();
+    }
     console.warn('Error fetching users from Firestore:', err);
   }
-  return getLocal<User[]>(LS_KEYS.USERS, []);
+  return getLocal<User[]>(LS_KEYS.USERS, INITIAL_USERS);
 }
 
 export function subscribeToUsers(callback: (users: User[]) => void): () => void {
+  let hasEmitted = false;
   try {
     const q = query(collection(db, COLLECTIONS.USERS));
     return onSnapshot(
       q,
       (snap) => {
+        hasEmitted = true;
         const list = snap.docs.map((d) => d.data() as User);
         setLocal(LS_KEYS.USERS, list);
         callback(list);
       },
       (err) => {
-        console.warn('Users live listener error:', err);
-        callback(getLocal<User[]>(LS_KEYS.USERS, []));
+        if (isFirestoreQuotaError(err)) {
+          notifyQuotaExceeded();
+          console.warn('Users live listener paused (Firestore daily quota exceeded); serving cached users.');
+        } else {
+          console.error('Users live listener error:', err);
+        }
+        if (!hasEmitted) {
+          callback(getLocal<User[]>(LS_KEYS.USERS, INITIAL_USERS));
+        }
       }
     );
   } catch (err) {
-    callback(getLocal<User[]>(LS_KEYS.USERS, []));
+    callback(getLocal<User[]>(LS_KEYS.USERS, INITIAL_USERS));
     return () => {};
   }
 }
@@ -122,29 +236,23 @@ export function sanitizeForFirestore<T>(data: T): T {
 }
 
 export async function saveUserToDb(user: User): Promise<void> {
-  const current = getLocal<User[]>(LS_KEYS.USERS, []);
-  const idx = current.findIndex((u) => u.id === user.id);
-  if (idx >= 0) current[idx] = user;
-  else current.push(user);
-  setLocal(LS_KEYS.USERS, current);
-
   try {
     const cleanUser = sanitizeForFirestore(user);
     await setDoc(doc(db, COLLECTIONS.USERS, user.id), cleanUser);
+    upsertLocalCollectionItem(LS_KEYS.USERS, user);
   } catch (err) {
-    console.warn('Error saving user to Firestore:', err);
+    console.error('Error saving user to Firestore:', err);
+    throw err;
   }
 }
 
 export async function deleteUserFromDb(userId: string): Promise<void> {
-  const current = getLocal<User[]>(LS_KEYS.USERS, []);
-  const updated = current.filter((u) => u.id !== userId);
-  setLocal(LS_KEYS.USERS, updated);
-
   try {
     await deleteDoc(doc(db, COLLECTIONS.USERS, userId));
+    removeLocalCollectionItem<User>(LS_KEYS.USERS, userId);
   } catch (err) {
-    console.warn('Error deleting user from Firestore:', err);
+    console.error('Error deleting user from Firestore:', err);
+    throw err;
   }
 }
 
@@ -156,24 +264,36 @@ export async function fetchAthletes(): Promise<Athlete[]> {
     setLocal(LS_KEYS.ATHLETES, list);
     return list;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      notifyQuotaExceeded();
+    }
     console.warn('Error fetching athletes from Firestore:', err);
   }
   return getLocal<Athlete[]>(LS_KEYS.ATHLETES, []);
 }
 
 export function subscribeToAthletes(callback: (athletes: Athlete[]) => void): () => void {
+  let hasEmitted = false;
   try {
     const q = query(collection(db, COLLECTIONS.ATHLETES));
     return onSnapshot(
       q,
       (snap) => {
+        hasEmitted = true;
         const list = snap.docs.map((d) => d.data() as Athlete);
         setLocal(LS_KEYS.ATHLETES, list);
         callback(list);
       },
       (err) => {
-        console.warn('Athletes live listener error:', err);
-        callback(getLocal<Athlete[]>(LS_KEYS.ATHLETES, []));
+        if (isFirestoreQuotaError(err)) {
+          notifyQuotaExceeded();
+          console.warn('Athletes live listener paused (Firestore daily quota exceeded); serving cached athletes.');
+        } else {
+          console.error('Athletes live listener error:', err);
+        }
+        if (!hasEmitted) {
+          callback(getLocal<Athlete[]>(LS_KEYS.ATHLETES, []));
+        }
       }
     );
   } catch (err) {
@@ -183,28 +303,22 @@ export function subscribeToAthletes(callback: (athletes: Athlete[]) => void): ()
 }
 
 export async function saveAthleteToDb(athlete: Athlete): Promise<void> {
-  const current = getLocal<Athlete[]>(LS_KEYS.ATHLETES, []);
-  const idx = current.findIndex((a) => a.id === athlete.id);
-  if (idx >= 0) current[idx] = athlete;
-  else current.push(athlete);
-  setLocal(LS_KEYS.ATHLETES, current);
-
   try {
     await setDoc(doc(db, COLLECTIONS.ATHLETES, athlete.id), sanitizeForFirestore(athlete));
+    upsertLocalCollectionItem(LS_KEYS.ATHLETES, athlete);
   } catch (err) {
-    console.warn('Error saving athlete to Firestore:', err);
+    console.error('Error saving athlete to Firestore:', err);
+    throw err;
   }
 }
 
 export async function deleteAthleteFromDb(athleteId: string): Promise<void> {
-  const current = getLocal<Athlete[]>(LS_KEYS.ATHLETES, []);
-  const updated = current.filter((a) => a.id !== athleteId);
-  setLocal(LS_KEYS.ATHLETES, updated);
-
   try {
     await deleteDoc(doc(db, COLLECTIONS.ATHLETES, athleteId));
+    removeLocalCollectionItem<Athlete>(LS_KEYS.ATHLETES, athleteId);
   } catch (err) {
-    console.warn('Error deleting athlete from Firestore:', err);
+    console.error('Error deleting athlete from Firestore:', err);
+    throw err;
   }
 }
 
@@ -217,25 +331,37 @@ export async function fetchTrainings(): Promise<TrainingSession[]> {
     setLocal(LS_KEYS.TRAININGS, list);
     return list;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      notifyQuotaExceeded();
+    }
     console.warn('Error fetching trainings from Firestore:', err);
   }
   return getLocal<TrainingSession[]>(LS_KEYS.TRAININGS, []);
 }
 
 export function subscribeToTrainings(callback: (trainings: TrainingSession[]) => void): () => void {
+  let hasEmitted = false;
   try {
     const q = query(collection(db, COLLECTIONS.TRAININGS));
     return onSnapshot(
       q,
       (snap) => {
+        hasEmitted = true;
         const list = snap.docs.map((d) => d.data() as TrainingSession);
         list.sort((a, b) => (a.date > b.date ? -1 : 1));
         setLocal(LS_KEYS.TRAININGS, list);
         callback(list);
       },
       (err) => {
-        console.warn('Trainings live listener error:', err);
-        callback(getLocal<TrainingSession[]>(LS_KEYS.TRAININGS, []));
+        if (isFirestoreQuotaError(err)) {
+          notifyQuotaExceeded();
+          console.warn('Trainings live listener paused (Firestore daily quota exceeded); serving cached trainings.');
+        } else {
+          console.error('Trainings live listener error:', err);
+        }
+        if (!hasEmitted) {
+          callback(getLocal<TrainingSession[]>(LS_KEYS.TRAININGS, []));
+        }
       }
     );
   } catch (err) {
@@ -245,29 +371,200 @@ export function subscribeToTrainings(callback: (trainings: TrainingSession[]) =>
 }
 
 export async function saveTrainingToDb(training: TrainingSession): Promise<void> {
-  const current = getLocal<TrainingSession[]>(LS_KEYS.TRAININGS, []);
-  const idx = current.findIndex((t) => t.id === training.id);
-  if (idx >= 0) current[idx] = training;
-  else current.push(training);
-  setLocal(LS_KEYS.TRAININGS, current);
-
-  try {
-    await setDoc(doc(db, COLLECTIONS.TRAININGS, training.id), sanitizeForFirestore(training));
-  } catch (err) {
-    console.warn('Error saving training to Firestore:', err);
-  }
+  return enqueueDocMutation(`trainings:${training.id}`, async () => {
+    try {
+      await setDoc(doc(db, COLLECTIONS.TRAININGS, training.id), sanitizeForFirestore(training));
+      upsertLocalCollectionItem(LS_KEYS.TRAININGS, training);
+    } catch (err) {
+      console.error('Error saving training to Firestore:', err);
+      throw err;
+    }
+  });
 }
 
 export async function deleteTrainingFromDb(trainingId: string): Promise<void> {
-  const current = getLocal<TrainingSession[]>(LS_KEYS.TRAININGS, []);
-  const updated = current.filter((t) => t.id !== trainingId);
-  setLocal(LS_KEYS.TRAININGS, updated);
+  return enqueueDocMutation(`trainings:${trainingId}`, async () => {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.TRAININGS, trainingId));
+      removeLocalCollectionItem<TrainingSession>(LS_KEYS.TRAININGS, trainingId);
+    } catch (err) {
+      console.error('Error deleting training from Firestore:', err);
+      throw err;
+    }
+  });
+}
 
-  try {
-    await deleteDoc(doc(db, COLLECTIONS.TRAININGS, trainingId));
-  } catch (err) {
-    console.warn('Error deleting training from Firestore:', err);
-  }
+// Atomic transaction-based updater for concurrent training writes (registrations, absences, attendance)
+export async function mutateTrainingSessionAtomic(
+  trainingId: string,
+  buildPatch: (latest: TrainingSession) => Partial<TrainingSession>
+): Promise<TrainingSession> {
+  return enqueueDocMutation(`trainings:${trainingId}`, async () => {
+    const ref = doc(db, COLLECTIONS.TRAININGS, trainingId);
+    try {
+      const updatedSession = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          throw new Error('Sessione di allenamento non trovata nel database.');
+        }
+        const latest = snap.data() as TrainingSession;
+        const patch = buildPatch(latest);
+        const cleanPatch = sanitizeForFirestore(patch) as Partial<TrainingSession>;
+        tx.update(ref, cleanPatch as Record<string, any>);
+        return {
+          ...latest,
+          ...patch,
+          id: latest.id,
+        } as TrainingSession;
+      });
+      upsertLocalCollectionItem(LS_KEYS.TRAININGS, updatedSession);
+      return updatedSession;
+    } catch (err) {
+      console.error('Atomic training transaction failed:', err);
+      throw err;
+    }
+  });
+}
+
+export async function toggleTrainingRegistrationAtomic(
+  trainingId: string,
+  athleteId: string
+): Promise<TrainingSession> {
+  return mutateTrainingSessionAtomic(trainingId, (latest) => {
+    const currentReg = latest.registeredAthleteIds || [];
+    const currentAbsences = latest.absentAthletes || [];
+    const isRegistered = currentReg.includes(athleteId);
+
+    const registeredAthleteIds = isRegistered
+      ? currentReg.filter((id) => id !== athleteId)
+      : Array.from(new Set([...currentReg, athleteId]));
+
+    const absentAthletes = isRegistered
+      ? currentAbsences
+      : currentAbsences.filter((a) => a.athleteId !== athleteId);
+
+    return { registeredAthleteIds, absentAthletes };
+  });
+}
+
+export async function setTrainingAbsenceAtomic(
+  trainingId: string,
+  athleteId: string,
+  absent: boolean,
+  reason?: string
+): Promise<TrainingSession> {
+  return mutateTrainingSessionAtomic(trainingId, (latest) => {
+    const currentReg = latest.registeredAthleteIds || [];
+    const currentAbsences = latest.absentAthletes || [];
+
+    if (!absent) {
+      return {
+        absentAthletes: currentAbsences.filter((a) => a.athleteId !== athleteId),
+      };
+    }
+
+    const newEntry: TrainingAbsence = {
+      athleteId,
+      reason: reason?.trim() || undefined,
+      communicatedAt: new Date().toISOString(),
+    };
+    const absentAthletes = [
+      ...currentAbsences.filter((a) => a.athleteId !== athleteId),
+      newEntry,
+    ];
+    const registeredAthleteIds = currentReg.filter((id) => id !== athleteId);
+    return { registeredAthleteIds, absentAthletes };
+  });
+}
+
+export async function updateTrainingAttendeeAtomic(
+  trainingId: string,
+  athleteId: string,
+  status: TrainingAttendee['status'],
+  performanceRating?: number,
+  notes?: string
+): Promise<TrainingSession> {
+  return mutateTrainingSessionAtomic(trainingId, (latest) => {
+    const currentAttendees = [...(latest.attendees || [])];
+    const existingIndex = currentAttendees.findIndex((a) => a.athleteId === athleteId);
+    const existing = existingIndex >= 0 ? currentAttendees[existingIndex] : undefined;
+
+    const attendeeRecord: TrainingAttendee = {
+      athleteId,
+      status,
+      performanceRating: performanceRating ?? existing?.performanceRating,
+      coachNotes: notes ?? existing?.coachNotes,
+      checkInTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+    };
+
+    if (existingIndex >= 0) {
+      currentAttendees[existingIndex] = attendeeRecord;
+    } else {
+      currentAttendees.push(attendeeRecord);
+    }
+
+    return { attendees: currentAttendees };
+  });
+}
+
+export async function completeTrainingSessionAtomic(
+  trainingId: string,
+  athletes: Athlete[]
+): Promise<TrainingSession> {
+  return mutateTrainingSessionAtomic(trainingId, (latest) => {
+    const regIds = new Set(latest.registeredAthleteIds || []);
+    const absByAth = new Map(
+      (latest.absentAthletes || []).map((ab) => [ab.athleteId, ab])
+    );
+    const existingByAth = new Map(
+      (latest.attendees || []).map((att) => [att.athleteId, att])
+    );
+
+    const attendees: TrainingAttendee[] = athletes.map((a) => {
+      const existing = existingByAth.get(a.id);
+      const communicatedAbs = absByAth.get(a.id);
+      const defaultStatus: TrainingAttendee['status'] =
+        a.status === 'infortunato'
+          ? 'infortunato'
+          : regIds.has(a.id)
+          ? 'presente'
+          : communicatedAbs
+          ? 'giustificato'
+          : 'assente';
+
+      return {
+        athleteId: a.id,
+        status: existing?.status ?? defaultStatus,
+        checkInTime: existing?.checkInTime,
+        coachNotes: existing?.coachNotes ?? communicatedAbs?.reason,
+        performanceRating: existing?.performanceRating ?? 4,
+      };
+    });
+
+    return {
+      status: 'completato' as const,
+      attendees,
+    };
+  });
+}
+
+export async function updateTrainingMetadataAtomic(
+  trainingId: string,
+  metadata: Pick<
+    TrainingSession,
+    | 'date'
+    | 'startTime'
+    | 'endTime'
+    | 'location'
+    | 'teamCategory'
+    | 'title'
+    | 'objective'
+    | 'primaryFocus'
+    | 'coachNotes'
+    | 'drills'
+  >
+): Promise<TrainingSession> {
+  return mutateTrainingSessionAtomic(trainingId, () => ({ ...metadata }));
 }
 
 // ----------------- MATCHES -----------------
@@ -279,25 +576,37 @@ export async function fetchMatches(): Promise<MatchEvent[]> {
     setLocal(LS_KEYS.MATCHES, list);
     return list;
   } catch (err) {
+    if (isFirestoreQuotaError(err)) {
+      notifyQuotaExceeded();
+    }
     console.warn('Error fetching matches from Firestore:', err);
   }
   return getLocal<MatchEvent[]>(LS_KEYS.MATCHES, []);
 }
 
 export function subscribeToMatches(callback: (matches: MatchEvent[]) => void): () => void {
+  let hasEmitted = false;
   try {
     const q = query(collection(db, COLLECTIONS.MATCHES));
     return onSnapshot(
       q,
       (snap) => {
+        hasEmitted = true;
         const list = snap.docs.map((d) => d.data() as MatchEvent);
         list.sort((a, b) => (a.date > b.date ? 1 : -1));
         setLocal(LS_KEYS.MATCHES, list);
         callback(list);
       },
       (err) => {
-        console.warn('Matches live listener error:', err);
-        callback(getLocal<MatchEvent[]>(LS_KEYS.MATCHES, []));
+        if (isFirestoreQuotaError(err)) {
+          notifyQuotaExceeded();
+          console.warn('Matches live listener paused (Firestore daily quota exceeded); serving cached matches.');
+        } else {
+          console.error('Matches live listener error:', err);
+        }
+        if (!hasEmitted) {
+          callback(getLocal<MatchEvent[]>(LS_KEYS.MATCHES, []));
+        }
       }
     );
   } catch (err) {
@@ -307,29 +616,141 @@ export function subscribeToMatches(callback: (matches: MatchEvent[]) => void): (
 }
 
 export async function saveMatchToDb(match: MatchEvent): Promise<void> {
-  const current = getLocal<MatchEvent[]>(LS_KEYS.MATCHES, []);
-  const idx = current.findIndex((m) => m.id === match.id);
-  if (idx >= 0) current[idx] = match;
-  else current.push(match);
-  setLocal(LS_KEYS.MATCHES, current);
-
-  try {
-    await setDoc(doc(db, COLLECTIONS.MATCHES, match.id), sanitizeForFirestore(match));
-  } catch (err) {
-    console.warn('Error saving match to Firestore:', err);
-  }
+  return enqueueDocMutation(`matches:${match.id}`, async () => {
+    try {
+      await setDoc(doc(db, COLLECTIONS.MATCHES, match.id), sanitizeForFirestore(match));
+      upsertLocalCollectionItem(LS_KEYS.MATCHES, match);
+    } catch (err) {
+      console.error('Error saving match to Firestore:', err);
+      throw err;
+    }
+  });
 }
 
 export async function deleteMatchFromDb(matchId: string): Promise<void> {
-  const current = getLocal<MatchEvent[]>(LS_KEYS.MATCHES, []);
-  const updated = current.filter((m) => m.id !== matchId);
-  setLocal(LS_KEYS.MATCHES, updated);
+  return enqueueDocMutation(`matches:${matchId}`, async () => {
+    try {
+      await deleteDoc(doc(db, COLLECTIONS.MATCHES, matchId));
+      removeLocalCollectionItem<MatchEvent>(LS_KEYS.MATCHES, matchId);
+    } catch (err) {
+      console.error('Error deleting match from Firestore:', err);
+      throw err;
+    }
+  });
+}
 
-  try {
-    await deleteDoc(doc(db, COLLECTIONS.MATCHES, matchId));
-  } catch (err) {
-    console.warn('Error deleting match from Firestore:', err);
-  }
+export async function mutateMatchEventAtomic(
+  matchId: string,
+  buildPatch: (latest: MatchEvent) => Partial<MatchEvent>
+): Promise<MatchEvent> {
+  return enqueueDocMutation(`matches:${matchId}`, async () => {
+    const ref = doc(db, COLLECTIONS.MATCHES, matchId);
+    try {
+      const updatedMatch = await runTransaction(db, async (tx) => {
+        const snap = await tx.get(ref);
+        if (!snap.exists()) {
+          throw new Error('Partita non trovata nel database.');
+        }
+        const latest = snap.data() as MatchEvent;
+        const patch = buildPatch(latest);
+        const cleanPatch = sanitizeForFirestore(patch) as Partial<MatchEvent>;
+        tx.update(ref, cleanPatch as Record<string, any>);
+        return {
+          ...latest,
+          ...patch,
+          id: latest.id,
+        } as MatchEvent;
+      });
+      upsertLocalCollectionItem(LS_KEYS.MATCHES, updatedMatch);
+      return updatedMatch;
+    } catch (err) {
+      console.error('Atomic match transaction failed:', err);
+      throw err;
+    }
+  });
+}
+
+export async function confirmMatchCallUpAtomic(
+  matchId: string,
+  athleteId: string,
+  confirmed: 'confermato' | 'non_disponibile',
+  responseNote?: string
+): Promise<MatchEvent> {
+  return mutateMatchEventAtomic(matchId, (latest) => {
+    const currentCallUps = [...(latest.convocati || [])];
+    const existingIdx = currentCallUps.findIndex((c) => c.athleteId === athleteId);
+    if (existingIdx >= 0) {
+      currentCallUps[existingIdx] = {
+        ...currentCallUps[existingIdx],
+        confirmed,
+        responseNote: responseNote || currentCallUps[existingIdx].responseNote,
+        respondedAt: new Date().toISOString(),
+      };
+    } else {
+      const newCallUp: MatchCallUp = {
+        athleteId,
+        roleInMatch: 'Panchina',
+        confirmed,
+        responseNote,
+        respondedAt: new Date().toISOString(),
+      };
+      currentCallUps.push(newCallUp);
+    }
+    return { convocati: currentCallUps };
+  });
+}
+
+export async function updateMatchScoutSetAtomic(
+  matchId: string,
+  setNumber: 1 | 2 | 3 | 4 | 5,
+  updater: (prevSet: MatchScoutSet) => MatchScoutSet,
+  defaultLiberoIds: string[]
+): Promise<MatchEvent> {
+  return mutateMatchEventAtomic(matchId, (latest) => {
+    const existingSets = [...(latest.scoutSets || [])];
+    const idx = existingSets.findIndex((s) => s.setNumber === setNumber);
+    const baseSet: MatchScoutSet =
+      idx >= 0
+        ? {
+            setNumber: existingSets[idx].setNumber,
+            lineup: existingSets[idx].lineup || {},
+            liberoIds: existingSets[idx].liberoIds || [],
+            substitutions: existingSets[idx].substitutions || [],
+            events: existingSets[idx].events || [],
+          }
+        : {
+            setNumber,
+            lineup: {},
+            liberoIds: defaultLiberoIds,
+            substitutions: [],
+            events: [],
+          };
+
+    const nextSet = updater(baseSet);
+    if (idx >= 0) {
+      existingSets[idx] = nextSet;
+    } else {
+      existingSets.push(nextSet);
+    }
+    existingSets.sort((a, b) => a.setNumber - b.setNumber);
+    return { scoutSets: existingSets };
+  });
+}
+
+export async function setMatchScoutPublishedAtomic(
+  matchId: string,
+  published: boolean
+): Promise<MatchEvent> {
+  return mutateMatchEventAtomic(matchId, () =>
+    published
+      ? {
+          scoutPublishedToAthletes: true,
+          scoutPublishedAt: new Date().toISOString(),
+        }
+      : {
+          scoutPublishedToAthletes: false,
+        }
+  );
 }
 
 // Convenient Named Aliases
@@ -395,6 +816,7 @@ export interface LocalRestorePoint {
 }
 
 const RESTORE_POINTS_KEY = 'vm_system_restore_points_v1';
+const RESTORE_HISTORY_KEY = 'vm_system_restore_history_v1';
 const FIRESTORE_SINGLE_DOC_SAFE_BYTES = 700_000;
 const FIRESTORE_CHUNK_SAFE_BYTES = 550_000;
 
@@ -633,11 +1055,13 @@ export async function fetchRestorePoints(): Promise<LocalRestorePoint[]> {
 }
 
 export function subscribeToRestorePoints(callback: (points: LocalRestorePoint[]) => void): () => void {
+  let hasEmitted = false;
   try {
     const q = query(collection(db, COLLECTIONS.RESTORE_POINTS));
     return onSnapshot(
       q,
       (snap) => {
+        hasEmitted = true;
         const list = snap.docs.map((d) => d.data() as LocalRestorePoint);
         list.sort((a, b) => (a.timestamp > b.timestamp ? -1 : 1));
         setLocal(
@@ -647,8 +1071,13 @@ export function subscribeToRestorePoints(callback: (points: LocalRestorePoint[])
         callback(list);
       },
       (err) => {
+        if (isFirestoreQuotaError(err)) {
+          notifyQuotaExceeded();
+        }
         console.warn('Restore points live listener error:', err);
-        callback(getLocal<LocalRestorePoint[]>(RESTORE_POINTS_KEY, []));
+        if (!hasEmitted) {
+          callback(getLocal<LocalRestorePoint[]>(RESTORE_POINTS_KEY, []));
+        }
       }
     );
   } catch (err) {
@@ -792,8 +1221,76 @@ export async function deleteLocalRestorePoint(id: string): Promise<void> {
   setLocal(RESTORE_POINTS_KEY, points.filter((p) => p.id !== id));
 }
 
+// ----------------- RESTORE HISTORY AUDIT LOG -----------------
+export async function fetchRestoreHistory(): Promise<RestoreHistoryEntry[]> {
+  try {
+    const snap = await getDocs(collection(db, COLLECTIONS.RESTORE_HISTORY));
+    const list = snap.docs.map((d) => d.data() as RestoreHistoryEntry);
+    list.sort((a, b) => (a.timestamp > b.timestamp ? -1 : 1));
+    setLocal(RESTORE_HISTORY_KEY, list);
+    return list;
+  } catch (err) {
+    console.warn('Error fetching restore history from Firestore:', err);
+  }
+  return getLocal<RestoreHistoryEntry[]>(RESTORE_HISTORY_KEY, []);
+}
+
+export function subscribeToRestoreHistory(
+  callback: (entries: RestoreHistoryEntry[]) => void
+): () => void {
+  let hasEmitted = false;
+  try {
+    const q = query(collection(db, COLLECTIONS.RESTORE_HISTORY));
+    return onSnapshot(
+      q,
+      (snap) => {
+        hasEmitted = true;
+        const list = snap.docs.map((d) => d.data() as RestoreHistoryEntry);
+        list.sort((a, b) => (a.timestamp > b.timestamp ? -1 : 1));
+        setLocal(RESTORE_HISTORY_KEY, list);
+        callback(list);
+      },
+      (err) => {
+        if (isFirestoreQuotaError(err)) {
+          notifyQuotaExceeded();
+          console.warn('Restore history live listener paused (Firestore daily quota exceeded); serving cached entries.');
+        } else {
+          console.error('Restore history live listener error:', err);
+        }
+        if (!hasEmitted) {
+          callback(getLocal<RestoreHistoryEntry[]>(RESTORE_HISTORY_KEY, []));
+        }
+      }
+    );
+  } catch (err) {
+    callback(getLocal<RestoreHistoryEntry[]>(RESTORE_HISTORY_KEY, []));
+    return () => {};
+  }
+}
+
+export async function recordRestoreHistory(
+  entryData: Omit<RestoreHistoryEntry, 'id' | 'timestamp'>
+): Promise<RestoreHistoryEntry> {
+  const entry: RestoreHistoryEntry = {
+    ...entryData,
+    id: `rh-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+    timestamp: new Date().toISOString(),
+  };
+
+  try {
+    await setDoc(doc(db, COLLECTIONS.RESTORE_HISTORY, entry.id), sanitizeForFirestore(entry));
+    const current = getLocal<RestoreHistoryEntry[]>(RESTORE_HISTORY_KEY, []);
+    const updated = [entry, ...current.filter((item) => item.id !== entry.id).slice(0, 99)];
+    setLocal(RESTORE_HISTORY_KEY, updated);
+    return entry;
+  } catch (err) {
+    console.error('Error recording restore history to Firestore:', err);
+    throw err;
+  }
+}
+
 // Aliases
 export const saveCloudRestorePoint = saveLocalRestorePoint;
 export const deleteCloudRestorePoint = deleteLocalRestorePoint;
 export const subscribeRestorePoints = subscribeToRestorePoints;
-
+export const subscribeRestoreHistory = subscribeToRestoreHistory;

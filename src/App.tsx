@@ -16,7 +16,7 @@ import {
   subscribeAthletes,
   subscribeTrainings,
   subscribeMatches,
-  subscribeUsers,
+  subscribeToQuotaStatus,
   saveAthlete,
   deleteAthlete,
   saveTrainingSession,
@@ -25,13 +25,15 @@ import {
   deleteMatchEvent,
   saveUser,
   deleteUser,
-  seedInitialDataIfEmpty,
+  toggleTrainingRegistrationAtomic,
+  setTrainingAbsenceAtomic,
+  confirmMatchCallUpAtomic,
 } from './lib/db';
 import { Athlete, TrainingSession, MatchEvent, User } from './types';
-import { Shield, Sparkles, Activity, Trophy, Calendar, Users, HeartPulse, Zap } from 'lucide-react';
+import { Shield, AlertTriangle, X } from 'lucide-react';
 
 function MainAppContent() {
-  const { currentUser, isCoach, isStaff, isAthlete, updateUser, canManageAll } = useAuth();
+  const { currentUser, allUsers: dbUsers, syncUsersList, isCoach, isStaff, isAthlete, updateUser, canManageAll } = useAuth();
   const canManage = isCoach || isStaff || Boolean(canManageAll);
 
   // Active Tab state
@@ -41,8 +43,9 @@ function MainAppContent() {
   const [athletes, setAthletes] = useState<Athlete[]>([]);
   const [trainings, setTrainings] = useState<TrainingSession[]>([]);
   const [matches, setMatches] = useState<MatchEvent[]>([]);
-  const [dbUsers, setDbUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(false);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
+  const [dismissQuotaBanner, setDismissQuotaBanner] = useState(false);
 
   // Login Modal
   const [showLoginModal, setShowLoginModal] = useState(false);
@@ -63,43 +66,40 @@ function MainAppContent() {
     }
   }, [currentUser?.role, activeTab]);
 
-  // Real-time Firestore Subscriptions & Initial Seed
+  // Monitor Firestore quota status for non-blocking offline/cache fallback banner
   useEffect(() => {
-    let unsubAthletes: () => void;
-    let unsubTrainings: () => void;
-    let unsubMatches: () => void;
-    let unsubUsers: () => void;
+    return subscribeToQuotaStatus((exceeded) => {
+      setQuotaExceeded(exceeded);
+    });
+  }, []);
 
-    async function initDb() {
-      await seedInitialDataIfEmpty();
-
-      unsubAthletes = subscribeAthletes((data) => {
-        setAthletes(data);
-        setLoading(false);
-      });
-
-      unsubTrainings = subscribeTrainings((data) => {
-        setTrainings(data);
-      });
-
-      unsubMatches = subscribeMatches((data) => {
-        setMatches(data);
-      });
-
-      unsubUsers = subscribeUsers((data) => {
-        setDbUsers(data);
-      });
+  // Real-time Firestore Subscriptions (only active when user is authenticated)
+  useEffect(() => {
+    if (!currentUser) {
+      setLoading(false);
+      return;
     }
 
-    initDb();
+    setLoading(true);
+    const unsubAthletes = subscribeAthletes((data) => {
+      setAthletes(data);
+      setLoading(false);
+    });
+
+    const unsubTrainings = subscribeTrainings((data) => {
+      setTrainings(data);
+    });
+
+    const unsubMatches = subscribeMatches((data) => {
+      setMatches(data);
+    });
 
     return () => {
-      if (unsubAthletes) unsubAthletes();
-      if (unsubTrainings) unsubTrainings();
-      if (unsubMatches) unsubMatches();
-      if (unsubUsers) unsubUsers();
+      unsubAthletes();
+      unsubTrainings();
+      unsubMatches();
     };
-  }, []);
+  }, [currentUser?.id]);
 
   // Athlete matching current user if logged in as athlete
   const currentAthleteRecord =
@@ -107,14 +107,27 @@ function MainAppContent() {
       ? athletes.find((a) => a.id === currentUser.athleteId)
       : undefined;
 
-  // Immediate State Handlers + Persistence
+  // Confirmed State Handlers + Persistence (commit UI state after Firestore confirms)
   const handleDeleteAthlete = async (athleteId: string) => {
-    setSelectedAthleteModal(null);
-    setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
     await deleteAthlete(athleteId);
+    setSelectedAthleteModal((prev) => (prev?.id === athleteId ? null : prev));
+    setAthletes((prev) => prev.filter((a) => a.id !== athleteId));
   };
 
   const handleSaveAthlete = async (athlete: Athlete) => {
+    await saveAthlete(athlete);
+
+    setAthletes((prev) => {
+      const idx = prev.findIndex((a) => a.id === athlete.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = athlete;
+        return copy;
+      }
+      return [athlete, ...prev];
+    });
+    setSelectedAthleteModal((prev) => (prev?.id === athlete.id ? athlete : prev));
+
     // Sync with linked user if any
     const linkedUser = dbUsers.find((u) => u.athleteId === athlete.id);
     if (linkedUser) {
@@ -126,34 +139,15 @@ function MainAppContent() {
         phone: athlete.phone || linkedUser.phone,
         email: athlete.email || linkedUser.email,
       };
-      setDbUsers((prev) => prev.map((u) => (u.id === updatedLinkedUser.id ? updatedLinkedUser : u)));
       await saveUser(updatedLinkedUser);
+      syncUsersList((prev) => prev.map((u) => (u.id === updatedLinkedUser.id ? updatedLinkedUser : u)));
       if (currentUser?.id === updatedLinkedUser.id) {
         await updateUser(updatedLinkedUser);
       }
     }
-
-    setAthletes((prev) => {
-      const idx = prev.findIndex((a) => a.id === athlete.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = athlete;
-        return copy;
-      }
-      return [athlete, ...prev];
-    });
-    if (selectedAthleteModal?.id === athlete.id) {
-      setSelectedAthleteModal(athlete);
-    }
-    await saveAthlete(athlete);
   };
 
-  const handleDeleteTraining = async (trainingId: string) => {
-    setTrainings((prev) => prev.filter((t) => t.id !== trainingId));
-    await deleteTrainingSession(trainingId);
-  };
-
-  const handleSaveTraining = async (training: TrainingSession) => {
+  const applyTrainingInState = (training: TrainingSession) => {
     setTrainings((prev) => {
       const idx = prev.findIndex((t) => t.id === training.id);
       if (idx >= 0) {
@@ -163,15 +157,19 @@ function MainAppContent() {
       }
       return [training, ...prev];
     });
+  };
+
+  const handleDeleteTraining = async (trainingId: string) => {
+    await deleteTrainingSession(trainingId);
+    setTrainings((prev) => prev.filter((t) => t.id !== trainingId));
+  };
+
+  const handleSaveTraining = async (training: TrainingSession) => {
     await saveTrainingSession(training);
+    applyTrainingInState(training);
   };
 
-  const handleDeleteMatch = async (matchId: string) => {
-    setMatches((prev) => prev.filter((m) => m.id !== matchId));
-    await deleteMatchEvent(matchId);
-  };
-
-  const handleSaveMatch = async (match: MatchEvent) => {
+  const applyMatchInState = (match: MatchEvent) => {
     setMatches((prev) => {
       const idx = prev.findIndex((m) => m.id === match.id);
       if (idx >= 0) {
@@ -181,15 +179,38 @@ function MainAppContent() {
       }
       return [match, ...prev];
     });
+  };
+
+  const handleDeleteMatch = async (matchId: string) => {
+    await deleteMatchEvent(matchId);
+    setMatches((prev) => prev.filter((m) => m.id !== matchId));
+  };
+
+  const handleSaveMatch = async (match: MatchEvent) => {
     await saveMatchEvent(match);
+    applyMatchInState(match);
   };
 
   const handleDeleteUser = async (userId: string) => {
-    setDbUsers((prev) => prev.filter((u) => u.id !== userId));
     await deleteUser(userId);
+    syncUsersList((prev) => prev.filter((u) => u.id !== userId));
   };
 
   const handleSaveUser = async (user: User) => {
+    await saveUser(user);
+    syncUsersList((prev) => {
+      const idx = prev.findIndex((u) => u.id === user.id);
+      if (idx >= 0) {
+        const copy = [...prev];
+        copy[idx] = user;
+        return copy;
+      }
+      return [...prev, user];
+    });
+    if (currentUser?.id === user.id) {
+      await updateUser(user);
+    }
+
     // Sync with linked athlete if any
     if (user.athleteId) {
       const linkedAth = athletes.find((a) => a.id === user.athleteId);
@@ -201,26 +222,10 @@ function MainAppContent() {
           phone: user.phone || linkedAth.phone,
           email: user.email || linkedAth.email,
         };
-        setAthletes((prev) => prev.map((a) => (a.id === updatedAth.id ? updatedAth : a)));
-        if (selectedAthleteModal?.id === updatedAth.id) {
-          setSelectedAthleteModal(updatedAth);
-        }
         await saveAthlete(updatedAth);
+        setAthletes((prev) => prev.map((a) => (a.id === updatedAth.id ? updatedAth : a)));
+        setSelectedAthleteModal((prev) => (prev?.id === updatedAth.id ? updatedAth : prev));
       }
-    }
-
-    setDbUsers((prev) => {
-      const idx = prev.findIndex((u) => u.id === user.id);
-      if (idx >= 0) {
-        const copy = [...prev];
-        copy[idx] = user;
-        return copy;
-      }
-      return [...prev, user];
-    });
-    await saveUser(user);
-    if (currentUser?.id === user.id) {
-      await updateUser(user);
     }
   };
 
@@ -235,6 +240,30 @@ function MainAppContent() {
 
       {/* Main Page Content */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 space-y-6">
+        {quotaExceeded && !dismissQuotaBanner && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-2xl p-4 flex items-start justify-between gap-3 text-xs text-amber-200 shadow-lg">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="font-bold text-amber-300">
+                  Quota giornaliera di letture Firestore esaurita — Modalità cache locale attiva
+                </p>
+                <p className="text-amber-100/80 leading-relaxed">
+                  Il database gratuito Firestore ha raggiunto il limite giornaliero di letture (&quot;Free daily read units&quot;). L&apos;app sta mostrando i dati salvati nella cache locale del dispositivo. La quota si azzera automaticamente domani.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setDismissQuotaBanner(true)}
+              className="p-1.5 text-amber-300/70 hover:text-amber-200 hover:bg-amber-500/20 rounded-lg transition-colors cursor-pointer shrink-0"
+              aria-label="Chiudi avviso quota"
+            >
+              <X className="w-4 h-4" />
+            </button>
+          </div>
+        )}
+
         {loading ? (
           <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-4">
             <div className="w-12 h-12 rounded-full border-4 border-amber-500/20 border-t-amber-500 animate-spin" />
@@ -298,6 +327,7 @@ function MainAppContent() {
                 athletes={athletes}
                 currentUser={currentUser}
                 onSaveTraining={handleSaveTraining}
+                onSyncTrainingState={applyTrainingInState}
                 onDeleteTraining={canManage ? handleDeleteTraining : undefined}
                 isCoach={canManage}
               />
@@ -311,6 +341,7 @@ function MainAppContent() {
                 athletes={athletes}
                 currentUser={currentUser}
                 onSaveMatch={handleSaveMatch}
+                onSyncMatchState={applyMatchInState}
                 onDeleteMatch={canManage ? handleDeleteMatch : undefined}
                 isCoach={canManage}
               />
@@ -384,59 +415,33 @@ function MainAppContent() {
                 matches={matches}
                 onToggleTrainingReg={async (t) => {
                   if (!currentAthleteRecord) return;
-                  const isReg = t.registeredAthleteIds?.includes(currentAthleteRecord.id);
-                  const updatedReg = isReg
-                    ? (t.registeredAthleteIds || []).filter((id) => id !== currentAthleteRecord.id)
-                    : [...(t.registeredAthleteIds || []), currentAthleteRecord.id];
-                  const updatedAbsences = isReg
-                    ? (t.absentAthletes || [])
-                    : (t.absentAthletes || []).filter((a) => a.athleteId !== currentAthleteRecord.id);
-                  await saveTrainingSession({
-                    ...t,
-                    registeredAthleteIds: updatedReg,
-                    absentAthletes: updatedAbsences,
-                  });
+                  const updated = await toggleTrainingRegistrationAtomic(
+                    t.id,
+                    currentAthleteRecord.id
+                  );
+                  applyTrainingInState(updated);
                 }}
                 onToggleTrainingAbsence={async (t, reason) => {
                   if (!currentAthleteRecord) return;
-                  const currentAbsences = t.absentAthletes || [];
-                  const isAbsent = currentAbsences.some((a) => a.athleteId === currentAthleteRecord.id);
-                  if (isAbsent) {
-                    await saveTrainingSession({
-                      ...t,
-                      absentAthletes: currentAbsences.filter((a) => a.athleteId !== currentAthleteRecord.id),
-                    });
-                  } else {
-                    const updatedReg = (t.registeredAthleteIds || []).filter(
-                      (id) => id !== currentAthleteRecord.id
-                    );
-                    const updatedAbsences = [
-                      ...currentAbsences,
-                      {
-                        athleteId: currentAthleteRecord.id,
-                        reason: reason?.trim() || undefined,
-                        communicatedAt: new Date().toISOString(),
-                      },
-                    ];
-                    await saveTrainingSession({
-                      ...t,
-                      registeredAthleteIds: updatedReg,
-                      absentAthletes: updatedAbsences,
-                    });
-                  }
+                  const isAbsent = (t.absentAthletes || []).some(
+                    (a) => a.athleteId === currentAthleteRecord.id
+                  );
+                  const updated = await setTrainingAbsenceAtomic(
+                    t.id,
+                    currentAthleteRecord.id,
+                    !isAbsent,
+                    reason
+                  );
+                  applyTrainingInState(updated);
                 }}
                 onConfirmMatchCallUp={async (m, status) => {
                   if (!currentAthleteRecord) return;
-                  const currentCallUps = [...(m.convocati || [])];
-                  const idx = currentCallUps.findIndex((c) => c.athleteId === currentAthleteRecord.id);
-                  if (idx >= 0) {
-                    currentCallUps[idx] = {
-                      ...currentCallUps[idx],
-                      confirmed: status,
-                      respondedAt: new Date().toISOString(),
-                    };
-                  }
-                  await saveMatchEvent({ ...m, convocati: currentCallUps });
+                  const updated = await confirmMatchCallUpAtomic(
+                    m.id,
+                    currentAthleteRecord.id,
+                    status
+                  );
+                  applyMatchInState(updated);
                 }}
                 onOpenMyDetailModal={() => {
                   if (currentAthleteRecord) {

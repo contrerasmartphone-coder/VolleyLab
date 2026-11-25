@@ -222,3 +222,25 @@ export interface ClubInfo {
     accent: string;
   };
 }
+
+export interface RestoreHistoryEntry {
+  id: string;
+  timestamp: string;
+  sourceType: 'cloud_snapshot' | 'json_file';
+  snapshotId?: string;
+  snapshotLabel: string;
+  mode: 'replace' | 'merge';
+  performedBy: {
+    userId: string;
+    username: string;
+    fullName: string;
+    role: string;
+  };
+  stats: {
+    restoredAthletes: number;
+    restoredTrainings: number;
+    restoredMatches: number;
+    restoredUsers: number;
+  };
+}
+

@@ -1,6 +1,13 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { TrainingSession, Athlete, User, TrainingAttendee, TrainingDrill } from '../../types';
-import { formatDate } from '../../lib/db';
+import {
+  formatDate,
+  toggleTrainingRegistrationAtomic,
+  setTrainingAbsenceAtomic,
+  updateTrainingAttendeeAtomic,
+  completeTrainingSessionAtomic,
+  updateTrainingMetadataAtomic,
+} from '../../lib/db';
 import {
   Calendar,
   Clock,
@@ -90,6 +97,7 @@ interface TrainingManagerProps {
   athletes: Athlete[];
   currentUser: User | null;
   onSaveTraining: (training: TrainingSession) => Promise<void>;
+  onSyncTrainingState?: (training: TrainingSession) => void;
   onDeleteTraining?: (trainingId: string) => Promise<void>;
   isCoach: boolean;
 }
@@ -99,6 +107,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
   athletes,
   currentUser,
   onSaveTraining,
+  onSyncTrainingState,
   onDeleteTraining,
   isCoach,
 }) => {
@@ -112,6 +121,11 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
   const [isFormModalOpen, setIsFormModalOpen] = useState(false);
   const [editingTrainingId, setEditingTrainingId] = useState<string | null>(null);
   const [activeTabModal, setActiveTabModal] = useState<'details' | 'drills' | 'attendance'>('attendance');
+
+  const activeSelectedTraining = useMemo(() => {
+    if (!selectedTraining) return null;
+    return trainings.find((t) => t.id === selectedTraining.id) ?? selectedTraining;
+  }, [trainings, selectedTraining]);
 
   // Form states for creating / editing a training session
   const [formData, setFormData] = useState({
@@ -144,39 +158,44 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
       return a.date.localeCompare(b.date);
     });
 
-  // Handle Athlete Toggle Registration
+  // Handle Athlete Toggle Registration (Atomic Firestore Transaction)
   const handleToggleRegistration = async (training: TrainingSession) => {
     if (!currentAthleteId) return;
+    const wasRegistered = Boolean(training.registeredAthleteIds?.includes(currentAthleteId));
 
-    const isRegistered = training.registeredAthleteIds?.includes(currentAthleteId);
-    let updatedRegistered = training.registeredAthleteIds || [];
-    let updatedAbsences = training.absentAthletes || [];
+    try {
+      const updatedTraining = await toggleTrainingRegistrationAtomic(
+        training.id,
+        currentAthleteId
+      );
+      onSyncTrainingState?.(updatedTraining);
+      if (selectedTraining?.id === training.id) {
+        setSelectedTraining(updatedTraining);
+      }
 
-    if (isRegistered) {
-      updatedRegistered = updatedRegistered.filter((id) => id !== currentAthleteId);
-    } else {
-      updatedRegistered = [...updatedRegistered, currentAthleteId];
-      updatedAbsences = updatedAbsences.filter((a) => a.athleteId !== currentAthleteId);
+      const nowRegistered = Boolean(
+        updatedTraining.registeredAthleteIds?.includes(currentAthleteId)
+      );
+      showToast({
+        message:
+          nowRegistered && !wasRegistered
+            ? "Iscrizione all'allenamento confermata!"
+            : !nowRegistered
+            ? 'Iscrizione sessione annullata'
+            : "Iscrizione all'allenamento confermata!",
+        type: nowRegistered ? 'success' : 'info',
+      });
+    } catch (err) {
+      console.error('Errore aggiornamento iscrizione:', err);
+      showToast({
+        message:
+          'Errore di salvataggio nel database. Verifica la connessione internet e riprova.',
+        type: 'error',
+      });
     }
-
-    const updatedTraining: TrainingSession = {
-      ...training,
-      registeredAthleteIds: updatedRegistered,
-      absentAthletes: updatedAbsences,
-    };
-
-    await onSaveTraining(updatedTraining);
-    if (selectedTraining?.id === training.id) {
-      setSelectedTraining(updatedTraining);
-    }
-
-    showToast({
-      message: isRegistered ? 'Iscrizione sessione annullata' : 'Iscrizione all\'allenamento confermata!',
-      type: isRegistered ? 'info' : 'success',
-    });
   };
 
-  // Handle Athlete Communicating Absence
+  // Handle Athlete Communicating Absence (Atomic Firestore Transaction)
   const handleCommunicateAbsence = async (training: TrainingSession) => {
     if (!currentAthleteId) return;
 
@@ -184,18 +203,28 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
     const isAlreadyAbsent = currentAbsences.some((a) => a.athleteId === currentAthleteId);
 
     if (isAlreadyAbsent) {
-      const updatedTraining: TrainingSession = {
-        ...training,
-        absentAthletes: currentAbsences.filter((a) => a.athleteId !== currentAthleteId),
-      };
-      await onSaveTraining(updatedTraining);
-      if (selectedTraining?.id === training.id) {
-        setSelectedTraining(updatedTraining);
+      try {
+        const updatedTraining = await setTrainingAbsenceAtomic(
+          training.id,
+          currentAthleteId,
+          false
+        );
+        onSyncTrainingState?.(updatedTraining);
+        if (selectedTraining?.id === training.id) {
+          setSelectedTraining(updatedTraining);
+        }
+        showToast({
+          message: 'Comunicazione di assenza rimossa',
+          type: 'info',
+        });
+      } catch (err) {
+        console.error('Errore rimozione assenza:', err);
+        showToast({
+          message:
+            'Errore di salvataggio nel database. Verifica la connessione internet e riprova.',
+          type: 'error',
+        });
       }
-      showToast({
-        message: 'Comunicazione di assenza rimossa',
-        type: 'info',
-      });
       return;
     }
 
@@ -210,36 +239,33 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
 
     if (reason === null) return;
 
-    const updatedRegistered = (training.registeredAthleteIds || []).filter(
-      (id) => id !== currentAthleteId
-    );
-    const updatedAbsences = [
-      ...currentAbsences,
-      {
-        athleteId: currentAthleteId,
-        reason: reason.trim() || undefined,
-        communicatedAt: new Date().toISOString(),
-      },
-    ];
+    try {
+      const updatedTraining = await setTrainingAbsenceAtomic(
+        training.id,
+        currentAthleteId,
+        true,
+        reason
+      );
+      onSyncTrainingState?.(updatedTraining);
+      if (selectedTraining?.id === training.id) {
+        setSelectedTraining(updatedTraining);
+      }
 
-    const updatedTraining: TrainingSession = {
-      ...training,
-      registeredAthleteIds: updatedRegistered,
-      absentAthletes: updatedAbsences,
-    };
-
-    await onSaveTraining(updatedTraining);
-    if (selectedTraining?.id === training.id) {
-      setSelectedTraining(updatedTraining);
+      showToast({
+        message: 'Assenza comunicata allo staff tecnico!',
+        type: 'warning',
+      });
+    } catch (err) {
+      console.error('Errore comunicazione assenza:', err);
+      showToast({
+        message:
+          'Errore di salvataggio nel database. Verifica la connessione internet e riprova.',
+        type: 'error',
+      });
     }
-
-    showToast({
-      message: 'Assenza comunicata allo staff tecnico!',
-      type: 'warning',
-    });
   };
 
-  // Handle Coach marking attendance
+  // Handle Coach marking attendance (Atomic Firestore Transaction + Per-Doc Queue)
   const handleUpdateAttendeeStatus = async (
     training: TrainingSession,
     athleteId: string,
@@ -247,37 +273,31 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
     performanceRating?: number,
     notes?: string
   ) => {
-    const currentAttendees = [...(training.attendees || [])];
-    const existingIndex = currentAttendees.findIndex((a) => a.athleteId === athleteId);
+    try {
+      const updatedTraining = await updateTrainingAttendeeAtomic(
+        training.id,
+        athleteId,
+        status,
+        performanceRating,
+        notes
+      );
+      onSyncTrainingState?.(updatedTraining);
+      if (selectedTraining?.id === training.id) {
+        setSelectedTraining(updatedTraining);
+      }
 
-    const attendeeRecord: TrainingAttendee = {
-      athleteId,
-      status,
-      performanceRating: performanceRating ?? (existingIndex >= 0 ? currentAttendees[existingIndex].performanceRating : undefined),
-      coachNotes: notes ?? (existingIndex >= 0 ? currentAttendees[existingIndex].coachNotes : undefined),
-      checkInTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    };
-
-    if (existingIndex >= 0) {
-      currentAttendees[existingIndex] = attendeeRecord;
-    } else {
-      currentAttendees.push(attendeeRecord);
+      showToast({
+        message: `Presenza aggiornata (${status.toUpperCase()})`,
+        type: 'info',
+      });
+    } catch (err) {
+      console.error('Errore aggiornamento presenza:', err);
+      showToast({
+        message:
+          'Salvataggio presenza NON riuscito! Verifica la connessione internet e riprova.',
+        type: 'error',
+      });
     }
-
-    const updatedTraining: TrainingSession = {
-      ...training,
-      attendees: currentAttendees,
-    };
-
-    await onSaveTraining(updatedTraining);
-    if (selectedTraining?.id === training.id) {
-      setSelectedTraining(updatedTraining);
-    }
-
-    showToast({
-      message: `Presenza aggiornata (${status.toUpperCase()})`,
-      type: 'info',
-    });
   };
 
   // Open Create Training Modal
@@ -452,59 +472,64 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
       description: d.description?.trim() || '',
     }));
 
-    if (editingTrainingId) {
-      const existing = trainings.find((t) => t.id === editingTrainingId);
-      if (!existing) return;
-      const updated: TrainingSession = {
-        ...existing,
-        date: formData.date,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        location,
-        teamCategory: formData.teamCategory,
-        title: formData.title.trim(),
-        objective: formData.objective.trim() || 'Sessione Tecnica',
-        primaryFocus: formData.primaryFocus,
-        coachNotes: formData.coachNotes.trim(),
-        drills: normalizedDrills,
-      };
+    try {
+      if (editingTrainingId) {
+        const updated = await updateTrainingMetadataAtomic(editingTrainingId, {
+          date: formData.date,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          location,
+          teamCategory: formData.teamCategory,
+          title: formData.title.trim(),
+          objective: formData.objective.trim() || 'Sessione Tecnica',
+          primaryFocus: formData.primaryFocus,
+          coachNotes: formData.coachNotes.trim(),
+          drills: normalizedDrills,
+        });
+        onSyncTrainingState?.(updated);
+        if (selectedTraining?.id === editingTrainingId) {
+          setSelectedTraining(updated);
+        }
+        showToast({
+          message: `Sessione "${updated.title}" aggiornata con successo!`,
+          type: 'success',
+        });
+      } else {
+        const created: TrainingSession = {
+          id: `train-${Date.now()}`,
+          date: formData.date,
+          startTime: formData.startTime,
+          endTime: formData.endTime,
+          location,
+          teamCategory: formData.teamCategory,
+          title: formData.title.trim(),
+          objective: formData.objective.trim() || 'Sessione Tecnica',
+          primaryFocus: formData.primaryFocus,
+          drills: normalizedDrills,
+          coachNotes: formData.coachNotes.trim(),
+          registeredAthleteIds: [],
+          absentAthletes: [],
+          attendees: [],
+          status: 'programmato',
+        };
 
-      await onSaveTraining(updated);
-      if (selectedTraining?.id === editingTrainingId) {
-        setSelectedTraining(updated);
+        await onSaveTraining(created);
+        setSelectedTraining(created);
+        showToast({
+          message: `Nuova sessione "${created.title}" programmata!`,
+          type: 'success',
+        });
       }
-      showToast({
-        message: `Sessione "${updated.title}" aggiornata con successo!`,
-        type: 'success',
-      });
-    } else {
-      const created: TrainingSession = {
-        id: `train-${Date.now()}`,
-        date: formData.date,
-        startTime: formData.startTime,
-        endTime: formData.endTime,
-        location,
-        teamCategory: formData.teamCategory,
-        title: formData.title.trim(),
-        objective: formData.objective.trim() || 'Sessione Tecnica',
-        primaryFocus: formData.primaryFocus,
-        drills: normalizedDrills,
-        coachNotes: formData.coachNotes.trim(),
-        registeredAthleteIds: [],
-        absentAthletes: [],
-        attendees: [],
-        status: 'programmato',
-      };
 
-      await onSaveTraining(created);
-      setSelectedTraining(created);
+      setIsFormModalOpen(false);
+    } catch (err) {
+      console.error('Errore salvataggio allenamento:', err);
       showToast({
-        message: `Nuova sessione "${created.title}" programmata!`,
-        type: 'success',
+        message:
+          'Errore durante il salvataggio della sessione nel database. Riprova.',
+        type: 'error',
       });
     }
-
-    setIsFormModalOpen(false);
   };
 
   const getFocusBadgeColor = (focus: string) => {
@@ -861,7 +886,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
       )}
 
       {/* Selected Training Modal (Drills & Coach Attendance Register) */}
-      {selectedTraining && (
+      {activeSelectedTraining && (
         <div
           className="fixed inset-0 z-50 overflow-y-auto bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200"
           onClick={() => setSelectedTraining(null)}
@@ -875,24 +900,24 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
             <div className="p-6 border-b border-slate-800 bg-[#0b0e14] flex items-start justify-between gap-4">
               <div>
                 <div className="flex items-center gap-2">
-                  <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${getFocusBadgeColor(selectedTraining.primaryFocus)}`}>
-                    {selectedTraining.primaryFocus}
+                  <span className={`text-[10px] font-bold uppercase px-2 py-0.5 rounded-md border ${getFocusBadgeColor(activeSelectedTraining.primaryFocus)}`}>
+                    {activeSelectedTraining.primaryFocus}
                   </span>
                   <span className="text-xs text-slate-400 font-mono">
-                    {formatDate(selectedTraining.date)} • {selectedTraining.startTime} - {selectedTraining.endTime}
+                    {formatDate(activeSelectedTraining.date)} • {activeSelectedTraining.startTime} - {activeSelectedTraining.endTime}
                   </span>
                 </div>
                 <h2 className="text-xl font-bold text-white font-display mt-1">
-                  {selectedTraining.title}
+                  {activeSelectedTraining.title}
                 </h2>
-                <p className="text-xs text-slate-400 mt-0.5">{selectedTraining.location}</p>
+                <p className="text-xs text-slate-400 mt-0.5">{activeSelectedTraining.location}</p>
               </div>
 
               <div className="flex items-center gap-2">
                 {canManage && (
                   <button
                     id="edit-modal-training-btn"
-                    onClick={() => handleOpenEditModal(selectedTraining)}
+                    onClick={() => handleOpenEditModal(activeSelectedTraining)}
                     className="p-2 text-slate-400 hover:text-amber-400 hover:bg-amber-950/30 rounded-xl transition-colors cursor-pointer"
                     title="Modifica allenamento ed esercizi"
                   >
@@ -904,18 +929,26 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                     onClick={async () => {
                       const confirmed = await confirm({
                         title: 'Elimina Sessione di Allenamento',
-                        message: `Sei sicuro di voler eliminare la sessione "${selectedTraining.title}" del ${formatDate(selectedTraining.date)}? L'operazione cancellerà tutti i dettagli e il registro presenze.`,
+                        message: `Sei sicuro di voler eliminare la sessione "${activeSelectedTraining.title}" del ${formatDate(activeSelectedTraining.date)}? L'operazione cancellerà tutti i dettagli e il registro presenze.`,
                         confirmText: 'Sì, Elimina Sessione',
                         cancelText: 'Annulla',
                         type: 'danger',
                       });
                       if (confirmed) {
-                        await onDeleteTraining(selectedTraining.id);
-                        showToast({
-                          message: `Sessione "${selectedTraining.title}" eliminata`,
-                          type: 'info',
-                        });
-                        setSelectedTraining(null);
+                        try {
+                          await onDeleteTraining(activeSelectedTraining.id);
+                          showToast({
+                            message: `Sessione "${activeSelectedTraining.title}" eliminata`,
+                            type: 'info',
+                          });
+                          setSelectedTraining(null);
+                        } catch (err) {
+                          console.error('Errore eliminazione sessione:', err);
+                          showToast({
+                            message: 'Errore durante l\'eliminazione dal database. Riprova.',
+                            type: 'error',
+                          });
+                        }
                       }
                     }}
                     className="p-2 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-xl transition-colors cursor-pointer"
@@ -944,7 +977,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                       : 'text-slate-400 hover:text-white'
                   }`}
                 >
-                  Registro Presenze Effettive ({selectedTraining.attendees?.length || 0})
+                  Registro Presenze Effettive ({activeSelectedTraining.attendees?.length || 0})
                 </button>
               )}
               <button
@@ -955,11 +988,11 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                     : 'text-slate-400 hover:text-white'
                 }`}
               >
-                Esercizi & Scheda Tecnica ({selectedTraining.drills?.length || 0})
+                Esercizi & Scheda Tecnica ({activeSelectedTraining.drills?.length || 0})
               </button>
               {(() => {
-                const regIds = new Set(selectedTraining.registeredAthleteIds || []);
-                const absIds = new Set((selectedTraining.absentAthletes || []).map((ab) => ab.athleteId));
+                const regIds = new Set(activeSelectedTraining.registeredAthleteIds || []);
+                const absIds = new Set((activeSelectedTraining.absentAthletes || []).map((ab) => ab.athleteId));
                 const regCount = athletes.filter((a) => regIds.has(a.id)).length;
                 const absCount = athletes.filter((a) => !regIds.has(a.id) && absIds.has(a.id)).length;
                 const pendCount = athletes.filter((a) => !regIds.has(a.id) && !absIds.has(a.id)).length;
@@ -992,40 +1025,32 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                         onClick={async () => {
                           const confirmed = await confirm({
                             title: 'Completa Sessione di Allenamento',
-                            message: `Vuoi contrassegnare come completata la sessione "${selectedTraining.title}" registrando automaticamente i presenti?`,
+                            message: `Vuoi contrassegnare come completata la sessione "${activeSelectedTraining.title}" registrando automaticamente i presenti?`,
                             confirmText: 'Sì, Completa Sessione',
                             cancelText: 'Annulla',
                             type: 'info',
                           });
                           if (!confirmed) return;
 
-                          // Mark all registered as Present with one click
-                          const updated = {
-                            ...selectedTraining,
-                            status: 'completato' as const,
-                            attendees: athletes.map((a) => {
-                              const isReg = selectedTraining.registeredAthleteIds?.includes(a.id);
-                              const communicatedAbs = selectedTraining.absentAthletes?.find((ab) => ab.athleteId === a.id);
-                              return {
-                                athleteId: a.id,
-                                status: (a.status === 'infortunato'
-                                  ? 'infortunato'
-                                  : isReg
-                                  ? 'presente'
-                                  : communicatedAbs
-                                  ? 'giustificato'
-                                  : 'assente') as any,
-                                coachNotes: communicatedAbs?.reason,
-                                performanceRating: 4,
-                              };
-                            }),
-                          };
-                          await onSaveTraining(updated);
-                          setSelectedTraining(updated);
-                          showToast({
-                            message: 'Sessione completata e presenze registrate!',
-                            type: 'success',
-                          });
+                          try {
+                            const updated = await completeTrainingSessionAtomic(
+                              activeSelectedTraining.id,
+                              athletes
+                            );
+                            onSyncTrainingState?.(updated);
+                            setSelectedTraining(updated);
+                            showToast({
+                              message: 'Sessione completata e presenze registrate!',
+                              type: 'success',
+                            });
+                          } catch (err) {
+                            console.error('Errore completamento sessione:', err);
+                            showToast({
+                              message:
+                                'Errore di salvataggio nel database. Riprova.',
+                              type: 'error',
+                            });
+                          }
                         }}
                         className="px-3 py-1.5 bg-emerald-600/20 text-emerald-300 border border-emerald-500/30 rounded-xl text-xs font-bold hover:bg-emerald-600/30 transition-colors cursor-pointer"
                       >
@@ -1036,7 +1061,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
 
                   {/* Role Summary for Registered Athletes */}
                   {(() => {
-                    const regIds = new Set(selectedTraining.registeredAthleteIds || []);
+                    const regIds = new Set(activeSelectedTraining.registeredAthleteIds || []);
                     const regModalAthletes = athletes.filter((a) => regIds.has(a.id));
                     return (
                       <div className="p-3 bg-[#0b0e14] rounded-2xl border border-slate-800 flex flex-wrap items-center gap-2">
@@ -1071,9 +1096,9 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                       </thead>
                       <tbody className="divide-y divide-slate-800/60">
                         {athletes.map((athlete) => {
-                          const isRegistered = selectedTraining.registeredAthleteIds?.includes(athlete.id);
-                          const communicatedAbsence = selectedTraining.absentAthletes?.find((ab) => ab.athleteId === athlete.id);
-                          const attendee = selectedTraining.attendees?.find((a) => a.athleteId === athlete.id);
+                          const isRegistered = activeSelectedTraining.registeredAthleteIds?.includes(athlete.id);
+                          const communicatedAbsence = activeSelectedTraining.absentAthletes?.find((ab) => ab.athleteId === athlete.id);
+                          const attendee = activeSelectedTraining.attendees?.find((a) => a.athleteId === athlete.id);
 
                           return (
                             <tr key={athlete.id} className="hover:bg-[#161b26] transition-colors">
@@ -1128,7 +1153,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                                     {(['presente', 'assente', 'giustificato', 'infortunato'] as const).map((st) => (
                                       <button
                                         key={st}
-                                        onClick={() => handleUpdateAttendeeStatus(selectedTraining, athlete.id, st)}
+                                        onClick={() => handleUpdateAttendeeStatus(activeSelectedTraining, athlete.id, st)}
                                         className={`px-2 py-1 text-[10px] font-bold uppercase rounded-lg transition-all ${
                                           attendee?.status === st
                                             ? st === 'presente'
@@ -1168,7 +1193,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                                         key={star}
                                         onClick={() =>
                                           handleUpdateAttendeeStatus(
-                                            selectedTraining,
+                                            activeSelectedTraining,
                                             athlete.id,
                                             'presente',
                                             star
@@ -1208,10 +1233,10 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                     <span className="text-xs font-bold text-amber-400 uppercase tracking-wider block mb-1">
                       Obiettivo Tecnico della Seduta
                     </span>
-                    <p className="text-sm text-white font-medium">{selectedTraining.objective}</p>
-                    {selectedTraining.coachNotes && (
+                    <p className="text-sm text-white font-medium">{activeSelectedTraining.objective}</p>
+                    {activeSelectedTraining.coachNotes && (
                       <p className="text-xs text-slate-400 mt-2 italic bg-[#11141d] p-2.5 rounded-xl border border-slate-800">
-                        <strong>Note Tecniche:</strong> {selectedTraining.coachNotes}
+                        <strong>Note Tecniche:</strong> {activeSelectedTraining.coachNotes}
                       </p>
                     )}
                   </div>
@@ -1223,8 +1248,8 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                           Sequenza Drills & Esercizi
                         </h4>
                         {(() => {
-                          const totalSessionDuration = calculateDurationMinutes(selectedTraining.startTime, selectedTraining.endTime);
-                          const totalDrillsMinutes = selectedTraining.drills?.reduce((acc, d) => acc + (d.durationMinutes || 0), 0) || 0;
+                          const totalSessionDuration = calculateDurationMinutes(activeSelectedTraining.startTime, activeSelectedTraining.endTime);
+                          const totalDrillsMinutes = activeSelectedTraining.drills?.reduce((acc, d) => acc + (d.durationMinutes || 0), 0) || 0;
                           return (
                             <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-amber-500/15 text-amber-300 border border-amber-500/30">
                               {totalDrillsMinutes} / {totalSessionDuration} min totali
@@ -1234,8 +1259,8 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                       </div>
                     </div>
 
-                    {selectedTraining.drills && selectedTraining.drills.length > 0 ? (
-                      selectedTraining.drills.map((drill, index) => (
+                    {activeSelectedTraining.drills && activeSelectedTraining.drills.length > 0 ? (
+                      activeSelectedTraining.drills.map((drill, index) => (
                         <div
                           key={drill.id || index}
                           className="p-4 bg-[#0b0e14] rounded-2xl border border-slate-800 flex items-start gap-3"
@@ -1269,7 +1294,7 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
               {activeTabModal === 'details' && (
                 <div className="space-y-6">
                   {(() => {
-                    const regIds = new Set(selectedTraining.registeredAthleteIds || []);
+                    const regIds = new Set(activeSelectedTraining.registeredAthleteIds || []);
                     const regModalAthletes = athletes.filter((a) => regIds.has(a.id));
                     const roleCounts = getRegisteredRoleCounts(regModalAthletes);
                     return (
@@ -1339,15 +1364,15 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
 
                   <div className="space-y-3 pt-4 border-t border-slate-800">
                     <h4 className="text-xs font-bold uppercase tracking-wider text-rose-400">
-                      Assenze Comunicate dagli Atleti ({selectedTraining.absentAthletes?.length || 0})
+                      Assenze Comunicate dagli Atleti ({activeSelectedTraining.absentAthletes?.length || 0})
                     </h4>
-                    {(selectedTraining.absentAthletes?.length || 0) === 0 ? (
+                    {(activeSelectedTraining.absentAthletes?.length || 0) === 0 ? (
                       <div className="p-4 text-center border border-dashed border-slate-800 rounded-2xl text-slate-500 text-xs">
                         Nessuna assenza comunicata per questa sessione.
                       </div>
                     ) : (
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {(selectedTraining.absentAthletes || []).map((ab) => {
+                        {(activeSelectedTraining.absentAthletes || []).map((ab) => {
                           const ath = athletes.find((a) => a.id === ab.athleteId);
                           if (!ath) return null;
                           return (
@@ -1382,8 +1407,8 @@ export const TrainingManager: React.FC<TrainingManagerProps> = ({
                   </div>
 
                   {(() => {
-                    const regIds = new Set(selectedTraining.registeredAthleteIds || []);
-                    const absIds = new Set((selectedTraining.absentAthletes || []).map((ab) => ab.athleteId));
+                    const regIds = new Set(activeSelectedTraining.registeredAthleteIds || []);
+                    const absIds = new Set((activeSelectedTraining.absentAthletes || []).map((ab) => ab.athleteId));
                     const pendingAthletes = athletes.filter((a) => !regIds.has(a.id) && !absIds.has(a.id));
                     return (
                       <div className="space-y-3 pt-4 border-t border-slate-800">

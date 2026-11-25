@@ -289,13 +289,20 @@ export const AthleteList: React.FC<AthleteListProps> = ({
       injuries: [],
     };
 
-    await onSaveAthlete(newAthlete);
-    showToast({
-      message: `Atleta #${newAthlete.jerseyNumber} ${newAthlete.firstName} ${newAthlete.lastName} registrato con successo!`,
-      type: 'success',
-    });
-    handleCloseAddModal();
-    setSelectedAthlete(newAthlete);
+    try {
+      await onSaveAthlete(newAthlete);
+      showToast({
+        message: `Atleta #${newAthlete.jerseyNumber} ${newAthlete.firstName} ${newAthlete.lastName} registrato con successo!`,
+        type: 'success',
+      });
+      handleCloseAddModal();
+      setSelectedAthlete(newAthlete);
+    } catch {
+      showToast({
+        message: 'Errore durante il salvataggio dell\'atleta su Firestore. Riprova.',
+        type: 'error',
+      });
+    }
   };
 
   const handleDeleteAthleteConfirm = async (e: React.MouseEvent, ath: Athlete) => {
@@ -309,11 +316,18 @@ export const AthleteList: React.FC<AthleteListProps> = ({
       type: 'danger' as const,
     });
     if (confirmed) {
-      await onDeleteAthlete(ath.id);
-      showToast({
-        message: `Atleta ${ath.firstName} ${ath.lastName} eliminato con successo`,
-        type: 'info',
-      });
+      try {
+        await onDeleteAthlete(ath.id);
+        showToast({
+          message: `Atleta ${ath.firstName} ${ath.lastName} eliminato con successo`,
+          type: 'info',
+        });
+      } catch {
+        showToast({
+          message: 'Errore durante l\'eliminazione dell\'atleta da Firestore.',
+          type: 'error',
+        });
+      }
     }
   };
 
@@ -631,10 +645,10 @@ export const AthleteList: React.FC<AthleteListProps> = ({
             setSelectedAthlete(updated);
           }}
           onDelete={async (athleteId) => {
-            setSelectedAthlete(null);
             if (onDeleteAthlete) {
               await onDeleteAthlete(athleteId);
             }
+            setSelectedAthlete(null);
           }}
           isCoach={isCoach}
         />

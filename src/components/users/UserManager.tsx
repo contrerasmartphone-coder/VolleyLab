@@ -478,8 +478,6 @@ Ti aspettiamo!`;
       email: resolvedValues.email,
     };
 
-    setFormData(updatedUserForm);
-
     // Sync changes to the Athlete record as well so both sides match!
     const updatedAthlete: Athlete = {
       ...pendingAthlete,
@@ -489,18 +487,25 @@ Ti aspettiamo!`;
       email: resolvedValues.email,
     };
 
-    if (onSaveAthlete) {
-      await onSaveAthlete(updatedAthlete);
+    try {
+      if (onSaveAthlete) {
+        await onSaveAthlete(updatedAthlete);
+      }
+      setFormData(updatedUserForm);
+      setShowConflictModal(false);
+      setPendingAthlete(null);
+      setConflictFields([]);
+
+      showToast({
+        message: 'Discrepanze risolte con successo! Dati unificati per Utente e Atleta.',
+        type: 'success',
+      });
+    } catch {
+      showToast({
+        message: 'Errore durante la sincronizzazione dei dati su Firestore.',
+        type: 'error',
+      });
     }
-
-    setShowConflictModal(false);
-    setPendingAthlete(null);
-    setConflictFields([]);
-
-    showToast({
-      message: 'Discrepanze risolte con successo! Dati unificati per Utente e Atleta.',
-      type: 'success',
-    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -599,6 +604,11 @@ Ti aspettiamo!`;
         type: 'success',
       });
       setShowAddModal(false);
+    } catch {
+      showToast({
+        message: 'Errore durante il salvataggio delle credenziali su Firestore.',
+        type: 'error',
+      });
     } finally {
       setIsSubmitting(false);
     }
@@ -838,11 +848,18 @@ Ti aspettiamo!`;
                                   type: 'danger',
                                 });
                                 if (confirmed) {
-                                  await onDeleteUser(user.id);
-                                  showToast({
-                                    message: `Utente @${user.username} eliminato con successo`,
-                                    type: 'info',
-                                  });
+                                  try {
+                                    await onDeleteUser(user.id);
+                                    showToast({
+                                      message: `Utente @${user.username} eliminato con successo`,
+                                      type: 'info',
+                                    });
+                                  } catch {
+                                    showToast({
+                                      message: 'Errore durante l\'eliminazione dell\'utente su Firestore.',
+                                      type: 'error',
+                                    });
+                                  }
                                 }
                               }}
                               className="p-1.5 text-slate-400 hover:text-rose-400 hover:bg-rose-950/30 rounded-lg transition-colors cursor-pointer"

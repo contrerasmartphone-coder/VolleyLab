@@ -277,13 +277,20 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                       <button
                         id={`athlete-portal-toggle-${session.id}`}
                         onClick={async () => {
-                          await onToggleTrainingReg(session);
-                          showToast({
-                            message: isRegistered
-                              ? 'Iscrizione all\'allenamento rimossa'
-                              : 'Iscrizione all\'allenamento confermata!',
-                            type: isRegistered ? 'info' : 'success',
-                          });
+                          try {
+                            await onToggleTrainingReg(session);
+                            showToast({
+                              message: isRegistered
+                                ? 'Iscrizione all\'allenamento rimossa'
+                                : 'Iscrizione all\'allenamento confermata!',
+                              type: isRegistered ? 'info' : 'success',
+                            });
+                          } catch {
+                            showToast({
+                              message: 'Errore di salvataggio nel database. Verifica la connessione e riprova.',
+                              type: 'error',
+                            });
+                          }
                         }}
                         className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
                           isRegistered
@@ -304,28 +311,35 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                       <button
                         id={`athlete-portal-absence-${session.id}`}
                         onClick={async () => {
-                          if (isAbsent) {
-                            await onToggleTrainingAbsence(session);
-                            showToast({
-                              message: 'Comunicazione di assenza annullata',
-                              type: 'info',
-                            });
-                          } else {
-                            const reason = await prompt({
-                              title: 'Comunica Assenza Allenamento',
-                              message: `Vuoi comunicare allo staff la tua assenza per "${session.title}" del ${session.date}?`,
-                              placeholder: 'Motivo facoltativo (es. Lavoro, Studio, Indisposizione...)',
-                              confirmText: 'Comunica Assenza',
-                              cancelText: 'Annulla',
-                              required: false,
-                            });
-                            if (reason !== null) {
-                              await onToggleTrainingAbsence(session, reason);
+                          try {
+                            if (isAbsent) {
+                              await onToggleTrainingAbsence(session);
                               showToast({
-                                message: 'Assenza comunicata allo staff tecnico',
-                                type: 'warning',
+                                message: 'Comunicazione di assenza annullata',
+                                type: 'info',
                               });
+                            } else {
+                              const reason = await prompt({
+                                title: 'Comunica Assenza Allenamento',
+                                message: `Vuoi comunicare allo staff la tua assenza per "${session.title}" del ${session.date}?`,
+                                placeholder: 'Motivo facoltativo (es. Lavoro, Studio, Indisposizione...)',
+                                confirmText: 'Comunica Assenza',
+                                cancelText: 'Annulla',
+                                required: false,
+                              });
+                              if (reason !== null) {
+                                await onToggleTrainingAbsence(session, reason);
+                                showToast({
+                                  message: 'Assenza comunicata allo staff tecnico',
+                                  type: 'warning',
+                                });
+                              }
                             }
+                          } catch {
+                            showToast({
+                              message: 'Errore di salvataggio nel database. Verifica la connessione e riprova.',
+                              type: 'error',
+                            });
                           }
                         }}
                         className={`px-3 py-2 rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
@@ -404,11 +418,18 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                         <div className="flex gap-2">
                           <button
                             onClick={async () => {
-                              await onConfirmMatchCallUp(match, 'confermato');
-                              showToast({
-                                message: `Presenza alla gara contro ${match.opponent} confermata!`,
-                                type: 'success',
-                              });
+                              try {
+                                await onConfirmMatchCallUp(match, 'confermato');
+                                showToast({
+                                  message: `Presenza alla gara contro ${match.opponent} confermata!`,
+                                  type: 'success',
+                                });
+                              } catch {
+                                showToast({
+                                  message: 'Errore di salvataggio nel database. Verifica la connessione e riprova.',
+                                  type: 'error',
+                                });
+                              }
                             }}
                             className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg text-xs font-bold cursor-pointer"
                           >
@@ -424,11 +445,18 @@ export const AthletePortal: React.FC<AthletePortalProps> = ({
                                 cancelText: 'Annulla',
                               });
                               if (reason !== null) {
-                                await onConfirmMatchCallUp(match, 'non_disponibile');
-                                showToast({
-                                  message: `Indisponibilità per la gara contro ${match.opponent} salvata`,
-                                  type: 'warning',
-                                });
+                                try {
+                                  await onConfirmMatchCallUp(match, 'non_disponibile');
+                                  showToast({
+                                    message: `Indisponibilità per la gara contro ${match.opponent} salvata`,
+                                    type: 'warning',
+                                  });
+                                } catch {
+                                  showToast({
+                                    message: 'Errore di salvataggio nel database. Verifica la connessione e riprova.',
+                                    type: 'error',
+                                  });
+                                }
                               }
                             }}
                             className="px-2 py-1 bg-slate-800 hover:bg-rose-950/50 text-slate-400 hover:text-rose-300 rounded-lg text-xs cursor-pointer"

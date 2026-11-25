@@ -23,62 +23,57 @@ interface AuthContextType {
   switchUser: (userId: string) => void;
   switchRoleDemo: (role: UserRole, athleteId?: string) => void;
   updateUser: (updates: Partial<User>) => Promise<void>;
+  syncUsersList: (updater: (prev: User[]) => User[]) => void;
   isLoading: boolean;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 const CURRENT_USER_STORAGE_KEY = 'vm_current_user_session';
+const USERS_CACHE_KEY = 'vm_users_cache';
 
-export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const [currentUser, setCurrentUser] = useState<User | null>(null);
-  const [allUsers, setAllUsers] = useState<User[]>(INITIAL_USERS);
-  const [isLoading, setIsLoading] = useState(true);
-
-  // Initialize DB and load users + subscribe for real-time sync
-  useEffect(() => {
-    let unsubUsers: (() => void) | undefined;
-
-    async function init() {
-      try {
-        await seedInitialDataIfEmpty();
-        const users = await fetchUsers();
-        if (users && users.length > 0) {
-          setAllUsers(users);
-        }
-
-        const savedSession = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
-        if (savedSession) {
-          try {
-            const parsed = JSON.parse(savedSession);
-            const userList = (users && users.length > 0 ? users : INITIAL_USERS);
-            const found = userList.find(
-              (u) => u.id === parsed.id || u.username?.toLowerCase() === parsed.username?.toLowerCase()
-            );
-            if (found) {
-              setCurrentUser(found);
-            } else {
-              setCurrentUser(null);
-              localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
-            }
-          } catch (e) {
-            setCurrentUser(null);
-            localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
-          }
-        } else {
-          setCurrentUser(null);
-        }
-      } catch (err) {
-        console.error('Failed initializing auth & data:', err);
-        setCurrentUser(null);
-      } finally {
-        setIsLoading(false);
+function getCachedUsersSnapshot(): User[] {
+  try {
+    const raw = localStorage.getItem(USERS_CACHE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return parsed;
       }
     }
+  } catch {
+    // ignore cache parse errors
+  }
+  return INITIAL_USERS;
+}
 
-    init();
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [allUsers, setAllUsers] = useState<User[]>(() => getCachedUsersSnapshot());
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    try {
+      const savedSession = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+      if (!savedSession) return null;
+      const parsed = JSON.parse(savedSession);
+      const cached = getCachedUsersSnapshot();
+      return (
+        cached.find(
+          (u) => u.id === parsed.id || u.username?.toLowerCase() === parsed.username?.toLowerCase()
+        ) || null
+      );
+    } catch {
+      localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+      return null;
+    }
+  });
+  const [isLoading, setIsLoading] = useState(false);
 
-    unsubUsers = subscribeToUsers((freshUsers) => {
+  // Initialize DB once if needed and subscribe once to users for real-time sync
+  useEffect(() => {
+    let active = true;
+    seedInitialDataIfEmpty().catch(() => undefined);
+
+    const unsubUsers = subscribeToUsers((freshUsers) => {
+      if (!active) return;
       if (Array.isArray(freshUsers) && freshUsers.length > 0) {
         setAllUsers(freshUsers);
         // Refresh currentUser if updated in DB
@@ -97,7 +92,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     });
 
     return () => {
-      if (unsubUsers) unsubUsers();
+      active = false;
+      unsubUsers();
     };
   }, []);
 
@@ -116,32 +112,39 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Inserisci la password.' };
     }
 
-    // Always fetch fresh users from Firestore & local storage to be 100% up-to-date with any changes
+    // Check in-memory live list first; only fetch from Firestore if missing to save read quota
+    const findMatchingUser = (list: User[]) =>
+      list.find((u) => {
+        const uUsername = normalize(u.username);
+        const uEmail = normalize(u.email);
+        const uName = normalize(`${u.firstName} ${u.lastName}`);
+        const uAlpha = normalizeAlpha(u.username);
+
+        return (
+          uUsername === cleanId ||
+          uEmail === cleanId ||
+          uName === cleanId ||
+          (cleanIdAlpha.length > 3 && uAlpha === cleanIdAlpha)
+        );
+      });
+
     let userList = allUsers;
-    try {
-      const freshUsers = await fetchUsers();
-      if (freshUsers && freshUsers.length > 0) {
-        userList = freshUsers;
-        setAllUsers(freshUsers);
+    let matchedUser = findMatchingUser(userList);
+
+    if (!matchedUser) {
+      try {
+        const freshUsers = await fetchUsers();
+        if (freshUsers && freshUsers.length > 0) {
+          userList = freshUsers;
+          setAllUsers(freshUsers);
+          matchedUser = findMatchingUser(userList);
+        }
+      } catch (e) {
+        // fallback to current in-memory allUsers
       }
-    } catch (e) {
-      // fallback to current in-memory allUsers
     }
 
-    // Completely case-insensitive match on username, email, full name, or alphanumeric handle
-    const user = userList.find((u) => {
-      const uUsername = normalize(u.username);
-      const uEmail = normalize(u.email);
-      const uName = normalize(`${u.firstName} ${u.lastName}`);
-      const uAlpha = normalizeAlpha(u.username);
-
-      return (
-        uUsername === cleanId ||
-        uEmail === cleanId ||
-        uName === cleanId ||
-        (cleanIdAlpha.length > 3 && uAlpha === cleanIdAlpha)
-      );
-    });
+    const user = matchedUser;
 
     if (!user) {
       return {
@@ -224,6 +227,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setAllUsers((prev) => prev.map((u) => (u.id === updated.id ? updated : u)));
   };
 
+  const syncUsersList = (updater: (prev: User[]) => User[]) => {
+    setAllUsers((prev) => updater(prev));
+  };
+
   // Role booleans
   const isCoach = currentUser?.role === 'coach';
   const isStaff = currentUser?.role === 'staff';
@@ -260,6 +267,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         switchUser,
         switchRoleDemo,
         updateUser,
+        syncUsersList,
         isLoading,
       }}
     >
